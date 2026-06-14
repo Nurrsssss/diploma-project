@@ -21,9 +21,9 @@ COPY --from=builder /go/src/github.com/printprince/vitalem/appointment_service/a
 COPY --from=builder /go/src/github.com/printprince/vitalem/appointment_service/config.yaml .
 COPY --from=builder /go/src/github.com/printprince/vitalem/appointment_service/migrations/ ./migrations/
 
-EXPOSE 8803
+EXPOSE 8805
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8803/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8805/health || exit 1
 
 CMD ["./appointment_service"]
