@@ -33,7 +33,6 @@ services:
     plan: free
     dockerfilePath: ./clintech-backend/identity_service/Dockerfile
     dockerContext: ./clintech-backend
-    healthCheckPath: /health
     envVars:
       - key: SERVER_PORT
         value: 8801
@@ -53,8 +52,7 @@ services:
         value: ""
       - key: LOGGER_SERVICE_URL
         value: ""
-      - key: JWT_SECRET
-        fromGroup: clintech-shared
+      - fromGroup: clintech-shared
 
   # ---------------- Patient Service ----------------
   - type: pserv
@@ -63,7 +61,6 @@ services:
     plan: free
     dockerfilePath: ./clintech-backend/patient_service/Dockerfile
     dockerContext: ./clintech-backend
-    healthCheckPath: /health
     envVars:
       - key: SERVER_PORT
         value: 8804
@@ -81,8 +78,7 @@ services:
         value: require
       - key: LOGGER_SERVICE_URL
         value: ""
-      - key: JWT_SECRET
-        fromGroup: clintech-shared
+      - fromGroup: clintech-shared
 
   # ---------------- Specialist Service ----------------
   - type: pserv
@@ -91,7 +87,6 @@ services:
     plan: free
     dockerfilePath: ./clintech-backend/specialist_service/Dockerfile
     dockerContext: ./clintech-backend
-    healthCheckPath: /health
     envVars:
       - key: SERVER_PORT
         value: 8803
@@ -109,8 +104,7 @@ services:
         value: require
       - key: LOGGER_SERVICE_URL
         value: ""
-      - key: JWT_SECRET
-        fromGroup: clintech-shared
+      - fromGroup: clintech-shared
 
   # ---------------- Appointment Service ----------------
   - type: pserv
@@ -119,7 +113,6 @@ services:
     plan: free
     dockerfilePath: ./clintech-backend/appointment_service/Dockerfile
     dockerContext: ./clintech-backend
-    healthCheckPath: /health
     envVars:
       - key: SERVER_PORT
         value: 8805
@@ -139,8 +132,7 @@ services:
         value: ""
       - key: LOGGER_SERVICE_URL
         value: ""
-      - key: JWT_SECRET
-        fromGroup: clintech-shared
+      - fromGroup: clintech-shared
 
   # ---------------- Gateway (публичный вход) ----------------
   - type: web
@@ -161,8 +153,7 @@ services:
         value: http://specialist-service:8803
       - key: APPOINTMENT_SERVICE_URL
         value: http://appointment-service:8805
-      - key: JWT_SECRET
-        fromGroup: clintech-shared
+      - fromGroup: clintech-shared
 
   # ---------------- Frontend ----------------
   - type: web
