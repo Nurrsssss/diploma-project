@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: clintech_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: 61324
+      POSTGRES_USER: postgres
+      POSTGRES_DB: clintech_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [app-network]
+
+  rabbitmq:
+    image: rabbitmq:3-alpine
+    container_name: clintech_rabbitmq
+    restart: unless-stopped
+    networks: [app-network]
+
+  identity_service:
+    build:
+      context: .
+      dockerfile: ./identity_service/Dockerfile
+    container_name: identity_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASS: "61324"
+      DB_NAME: clintech_db
+      JWT_SECRET: 4324pkh23sk4jh342alhdlfl2sdjf
+      JWT_EXPIRE: "168"
+    depends_on: [postgres, rabbitmq]
+    networks: [app-network]
+
+  patient_service:
+    build:
+      context: .
+      dockerfile: ./patient_service/Dockerfile
+    container_name: patient_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASS: "61324"
+      DB_NAME: clintech_db
+      JWT_SECRET: 4324pkh23sk4jh342alhdlfl2sdjf
+    depends_on: [identity_service]
+    networks: [app-network]
+
+  specialist_service:
+    build:
+      context: .
+      dockerfile: ./specialist_service/Dockerfile
+    container_name: specialist_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASS: "61324"
+      DB_NAME: clintech_db
+      JWT_SECRET: 4324pkh23sk4jh342alhdlfl2sdjf
+    depends_on: [identity_service]
+    networks: [app-network]
+
+  appointment_service:
+    build:
+      context: .
+      dockerfile: ./appointment_service/Dockerfile
+    container_name: appointment_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: "61324"
+      DB_NAME: clintech_db
+      JWT_SECRET: 4324pkh23sk4jh342alhdlfl2sdjf
+    depends_on: [postgres, rabbitmq]
+    networks: [app-network]
+
+  fileserver_service:
+    build:
+      context: .
+      dockerfile: ./FileServerService/Dockerfile
+    container_name: fileserver_service
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: "61324"
+      DB_NAME: clintech_db
+      JWT_SECRET: 4324pkh23sk4jh342alhdlfl2sdjf
+    depends_on: [postgres]
+    networks: [app-network]
+
+  gateway_service:
+    build:
+      context: .
+      dockerfile: ./gateway_service/Dockerfile
+    container_name: gateway_service
+    restart: unless-stopped
+    environment:
+      GATEWAY_PORT: "8800"
+      JWT_SECRET: 4324pkh23sk4jh342alhdlfl2sdjf
+      PUBLIC_BASE_URL: https://clintech.nutristeppe.com
+      IDENTITY_SERVICE_URL: http://identity_service:8801
+      PATIENT_SERVICE_URL: http://patient_service:8804
+      SPECIALIST_SERVICE_URL: http://specialist_service:8803
+      APPOINTMENT_SERVICE_URL: http://appointment_service:8805
+      FILESERVER_SERVICE_URL: http://fileserver_service:8087
+    ports:
+      - "8800:8800"
+    depends_on:
+      - identity_service
+      - patient_service
+      - specialist_service
+      - appointment_service
+    networks: [app-network]
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

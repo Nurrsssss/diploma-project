@@ -1,0 +1,54 @@
+server:
+  port: 8806
+  read_timeout: 10s
+  write_timeout: 10s
+
+database:
+  host: "postgres"
+  port: 5432
+  user: "postgres"
+  password: "61324"
+  name: "clintech_db"
+  sslmode: "disable"
+
+rabbitmq:
+  url: "amqp://guest:guest@rabbitmq:5672/"
+
+logging:
+  console_level: info   # Уровень логов для консоли
+  service_level: info   # Уровень логов для logger_service
+  service_url: http://logger_service:8802
+
+jwt:
+  secret: "4324pkh23sk4jh342alhdlfl2sdjf"
+
+email:
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 465
+  smtp_username: "asylknazbaj@gmail.com"
+  smtp_password: "fsmi gwrw cdso pufr"
+  smtp_from: "Notification Service <asylknazbaj@gmail.com>"
+
+telegram:
+  bot_token: "8134913914:AAG51fnF2uuIn9go3JEXQKcUEy9smDR5Bpg"
+  chat_id: "-4705009453"
+
+# SMS через SMSC.kz (основной провайдер)
+sms:
+  provider: "smsc"
+  smsc:
+    login: "clintech"
+    password: "123QWEqwe!"
+    api_url: "https://smsc.kz/sys/send.php"
+    sender: "Clintech"  # Имя отправителя (опционально)
+
+# WhatsApp через Twilio (временно отключен, но сохранен)
+whatsapp:
+  enabled: false  # Отключаем пока что
+  account_sid: "ACf6a94ac70e2b2e0d8e3eeff79af33178"
+  auth_token: "3192906f83f9fb008cd4b2865a9fc043"
+  from_number: "whatsapp:+15557383462"
+
+auth:
+  jwt_secret: "4324pkh23sk4jh342alhdlfl2sdjf"
+  code_ttl_seconds: 300

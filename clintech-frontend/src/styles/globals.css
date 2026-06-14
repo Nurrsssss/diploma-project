@@ -1,0 +1,44 @@
+@import './animation.css';
+@import './ui.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply scroll-smooth antialiased;
+  }
+  body {
+    @apply font-outfit bg-pageBg text-slate-800;
+  }
+  ::selection {
+    @apply bg-cyan-200/80 text-teal-950;
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.container {
+  width: 80%;
+  margin: 0 auto;
+}
+
+@media (max-width: 768px) {
+  .container {
+    width: 90%;
+  }
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;     /* Firefox */
+}

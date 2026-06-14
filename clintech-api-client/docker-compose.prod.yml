@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: clintech_api_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: clintech_db
+      POSTGRES_USER: clintech_user
+      POSTGRES_PASSWORD: clintech_password
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - clintech_app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clintech_user -d clintech_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: clintech-api-client-api
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: clintech_user
+      DB_PASSWORD: clintech_password
+      DB_NAME: clintech_db
+      DB_SSLMODE: disable
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - clintech_app-network
+    healthcheck:
+      # HTTP-проверка, НЕ bash-хаки, НЕ /dev/tcp
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/swagger/index.html"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:
+
+networks:
+  clintech_app-network:
+    external: true

@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Предварительное заключение</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 1.5cm;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, -apple-system,
+          BlinkMacSystemFont, sans-serif;
+        font-size: 11pt;
+        line-height: 1.6;
+        color: #2d3748;
+        margin: 0;
+        padding: 0;
+        background: #f8fafc;
+      }
+
+      .document {
+        max-width: 100%;
+        margin: 0 auto;
+        background: white;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      }
+
+      /* Header Section */
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 40px 30px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .header::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="20" cy="20" r="1" fill="rgba(255,255,255,0.05)"/><circle cx="80" cy="80" r="1" fill="rgba(255,255,255,0.05)"/><circle cx="40" cy="70" r="1" fill="rgba(255,255,255,0.05)"/><circle cx="90" cy="40" r="1" fill="rgba(255,255,255,0.05)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+        opacity: 0.3;
+      }
+
+      .header-content {
+        position: relative;
+        z-index: 1;
+      }
+
+      .header h1 {
+        font-size: 28pt;
+        font-weight: 600;
+        margin: 0 0 10px 0;
+        letter-spacing: -0.5px;
+      }
+
+      .header h2 {
+        font-size: 16pt;
+        font-weight: 300;
+        margin: 0;
+        opacity: 0.9;
+      }
+
+      .doc-number {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: rgba(255, 255, 255, 0.15);
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-size: 10pt;
+        backdrop-filter: blur(10px);
+      }
+
+      /* Content Container */
+      .content {
+        padding: 25px 30px;
+      }
+
+      /* Patient Info Card */
+      .patient-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+        border: 1px solid #e2e8f0;
+        border-left: 4px solid #667eea;
+        page-break-after: avoid;
+        page-break-inside: avoid;
+      }
+
+      .patient-card h2 {
+        font-size: 16pt;
+        font-weight: 600;
+        margin: 0 0 15px 0;
+        color: #1a202c;
+        display: flex;
+        align-items: center;
+      }
+
+      .patient-card h2::before {
+        content: "";
+        margin-right: 0px;
+        font-size: 20pt;
+      }
+
+      .patient-info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .info-item {
+        display: flex;
+        padding: 8px 0;
+        border-bottom: 1px solid #f1f5f9;
+      }
+
+      .info-item:last-child {
+        border-bottom: none;
+      }
+
+      .info-label {
+        font-weight: 600;
+        color: #4a5568;
+        min-width: 120px;
+        margin-right: 15px;
+      }
+
+      .info-value {
+        color: #2d3748;
+        flex: 1;
+      }
+
+      /* Section Cards */
+      .section-card {
+        background: white;
+        border-radius: 12px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+        border: 1px solid #e2e8f0;
+        overflow: hidden;
+        page-break-inside: auto;
+      }
+
+      .section-header {
+        background: linear-gradient(90deg, #f7fafc 0%, #edf2f7 100%);
+        padding: 15px 20px;
+        border-bottom: 1px solid #e2e8f0;
+        page-break-after: avoid;
+      }
+
+      .section-header h3 {
+        font-size: 16pt;
+        font-weight: 600;
+        margin: 0;
+        color: #2d3748;
+        display: flex;
+        align-items: center;
+      }
+
+      .section-content {
+        padding: 20px;
+        line-height: 1.7;
+      }
+
+      /* Section Icons */
+      .section-header h3.documents::before {
+        content: "";
+        margin-right: 0px;
+        font-size: 18pt;
+      }
+
+      .section-header h3.conclusion::before {
+        content: "";
+        margin-right: 0px;
+        font-size: 18pt;
+      }
+
+      .section-header h3.recommendations::before {
+        content: "";
+        margin-right: 0px;
+        font-size: 18pt;
+      }
+
+      .section-header h3.system::before {
+        content: "";
+        margin-right: 0px;
+        font-size: 18pt;
+      }
+
+      .section-header h3.disclaimer::before {
+        content: "";
+        margin-right: 0px;
+        font-size: 18pt;
+      }
+
+      /* Content Styling */
+      .section-content p {
+        margin: 0 0 15px 0;
+        text-align: justify;
+      }
+
+      .section-content p:last-child {
+        margin-bottom: 0;
+      }
+
+      .section-content h4 {
+        font-size: 14pt;
+        font-weight: 600;
+        color: #2d3748;
+        margin: 0 0 12px 0;
+      }
+
+      /* Patient Answers Styling */
+      .answer-category {
+        margin-bottom: 25px;
+        padding: 20px;
+        background: #f8fafc;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+      }
+
+      .answer-category:last-child {
+        margin-bottom: 0;
+      }
+
+      .answer-category h4 {
+        font-size: 14pt;
+        font-weight: 600;
+        color: #2d3748;
+        margin: 0 0 15px 0;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .answer-item {
+        margin-bottom: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid #f1f5f9;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .answer-item:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+      }
+
+      .answer-label {
+        font-weight: 600;
+        color: #4a5568;
+        font-size: 11pt;
+      }
+
+      .answer-value {
+        color: #2d3748;
+        font-size: 11pt;
+        line-height: 1.5;
+        padding-left: 10px;
+        border-left: 2px solid #e2e8f0;
+        background: white;
+        padding: 10px;
+        border-radius: 4px;
+      }
+
+      .section-content ul {
+        margin: 0 0 15px 0;
+        padding-left: 20px;
+      }
+
+      .section-content li {
+        margin-bottom: 8px;
+        line-height: 1.6;
+      }
+
+      .section-content strong {
+        color: #2d3748;
+        font-weight: 600;
+      }
+
+      /* Empty State */
+      .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: #718096;
+        font-style: italic;
+      }
+
+      .empty-state::before {
+        content: "";
+        display: block;
+        font-size: 32pt;
+        margin-bottom: 10px;
+        opacity: 0.5;
+      }
+
+      /* System Info */
+      .system-info {
+        background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+        border-radius: 8px;
+        padding: 20px;
+        margin: 15px 0;
+      }
+
+      .system-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+      }
+
+      .system-item {
+        display: flex;
+        align-items: center;
+      }
+
+      .system-item strong {
+        margin-right: 10px;
+        color: #4a5568;
+      }
+
+      /* Signature */
+      .signature-section {
+        margin-top: 30px;
+        padding: 20px;
+        border-top: 2px solid #e2e8f0;
+      }
+
+      .signature-line {
+        border-bottom: 1px solid #4a5568;
+        width: 250px;
+        margin: 20px 0 10px 0;
+      }
+
+      /* Footer */
+      .footer {
+        background: #f7fafc;
+        padding: 20px 30px;
+        text-align: center;
+        font-size: 10pt;
+        color: #718096;
+        border-top: 1px solid #e2e8f0;
+      }
+
+      .footer strong {
+        color: #4a5568;
+      }
+
+      /* Disclaimer Styling */
+      .disclaimer-content {
+        background: #fef5e7;
+        border: 1px solid #f6ad55;
+        border-radius: 8px;
+        padding: 20px;
+        margin: 15px 0;
+      }
+
+      .disclaimer-content p {
+        color: #744210;
+        margin-bottom: 12px;
+      }
+
+      .disclaimer-content p:last-child {
+        margin-bottom: 0;
+      }
+
+      /* Print Styles */
+      @media print {
+        .document {
+          box-shadow: none;
+        }
+
+        .header {
+          background: #667eea !important;
+          color: white !important;
+          -webkit-print-color-adjust: exact;
+        }
+
+        .patient-card {
+          page-break-after: avoid !important;
+          page-break-inside: avoid !important;
+        }
+
+        .section-card {
+          box-shadow: none;
+          border: 1px solid #ccc;
+          page-break-inside: auto;
+        }
+
+        .section-header {
+          background: #f7fafc !important;
+          -webkit-print-color-adjust: exact;
+          page-break-after: avoid !important;
+        }
+
+        /* Предотвращаем разрыв между patient-card и первой section-card */
+        .patient-card + .section-card {
+          page-break-before: avoid !important;
+        }
+      }
+
+      /* Typography Enhancements */
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6 {
+        font-feature-settings: "kern" 1, "liga" 1;
+      }
+
+      p {
+        font-feature-settings: "kern" 1, "liga" 1;
+        text-rendering: optimizeLegibility;
+      }
+
+      /* Medical Conclusion Specific Styles */
+      .medical-conclusion {
+        line-height: 1.8;
+      }
+
+      .medical-conclusion strong {
+        display: block;
+        color: #2d3748;
+        font-weight: 600;
+        font-size: 12pt;
+        margin: 20px 0 8px 0;
+        padding: 8px 0;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .medical-conclusion strong:first-child {
+        margin-top: 0;
+      }
+
+      .medical-conclusion ul {
+        margin: 8px 0 15px 20px;
+        padding: 0;
+      }
+
+      .medical-conclusion li {
+        margin-bottom: 6px;
+        color: #4a5568;
+        font-size: 11pt;
+      }
+
+      .medical-conclusion p {
+        margin: 8px 0;
+        color: #4a5568;
+        font-size: 11pt;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="document">
+      <!-- Header -->
+      <header class="header">
+        <div class="doc-number">
+          Документ №{{.GeneratedAt | replace "." ""}}
+        </div>
+        <div class="header-content">
+          <h1>Предварительное заключение</h1>
+          <h2>Медицинский анализ на основе AI-диагностики</h2>
+        </div>
+      </header>
+
+      <!-- Content -->
+      <div class="content">
+        <!-- Patient Information Card -->
+        <div class="patient-card">
+          <h2>Информация о пациенте</h2>
+          <div class="patient-info-grid">
+            <div class="info-item">
+              <span class="info-label">ФИО:</span>
+              <span class="info-value"
+                >{{.Patient.FirstName}} {{.Patient.MiddleName}}
+                {{.Patient.LastName}}</span
+              >
+            </div>
+            <div class="info-item">
+              <span class="info-label">Дата рождения:</span>
+              <span class="info-value">{{.Patient.DateOfBirth}}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Пол:</span>
+              <span class="info-value">{{.Patient.Gender}}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">ИИН:</span>
+              <span class="info-value">{{.Patient.IIN}}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Дата анализа:</span>
+              <span class="info-value">{{.GeneratedAt}}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Жалобы и симптомы (аналитический контент) -->
+        {{if .Complaints}}
+        <div class="section-card" style="margin-top: 10px;">
+          <div class="section-header">
+            <h3 class="documents">Симптомы и текущее состояние здоровья</h3>
+          </div>
+          <div class="section-content">
+            {{.Complaints}}
+          </div>
+        </div>
+        {{end}}
+
+        <!-- Анамнез заболевания (аналитический контент) -->
+        {{if .MedicalHistory}}
+        <div class="section-card">
+          <div class="section-header">
+            <h3 class="documents">Анамнез заболевания</h3>
+          </div>
+          <div class="section-content">
+            {{.MedicalHistory}}
+          </div>
+        </div>
+        {{end}}
+
+        <!-- Анамнез жизни (аналитический контент) -->
+        {{if .Lifestyle}}
+        <div class="section-card">
+          <div class="section-header">
+            <h3 class="documents">Анамнез жизни</h3>
+          </div>
+          <div class="section-content">
+            {{.Lifestyle}}
+          </div>
+        </div>
+        {{end}}
+
+        <!-- Uploaded Documents Analysis -->
+        {{if .UploadedDocuments}}
+        <div class="section-card">
+          <div class="section-header">
+            <h3 class="documents">Анализ загруженных документов</h3>
+          </div>
+          <div class="section-content">
+            {{.UploadedDocuments}}
+          </div>
+        </div>
+        {{end}}
+
+        <!-- General Conclusion -->
+        {{if .GeneralConclusion}}
+        <div class="section-card">
+          <div class="section-header">
+            <h3 class="conclusion">Общее заключение</h3>
+          </div>
+          <div class="section-content medical-conclusion">
+            {{.GeneralConclusion}}
+          </div>
+        </div>
+        {{end}}
+
+      <!-- Footer -->
+      <footer class="footer">
+        <p>
+          <strong
+            >Документ сгенерирован автоматически системой Vitalem AI</strong
+          >
+        </p>
+        <p>Дата создания: {{.GeneratedAt}} • Платформа: vitalem.ai</p>
+      </footer>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,446 @@
+package docs
+
+import "github.com/swaggo/swag"
+
+const docTemplate = `{
+    "schemes": {{ marshal .Schemes }},
+    "swagger": "2.0",
+    "info": {
+        "description": "{{escape .Description}}",
+        "title": "{{.Title}}",
+        "termsOfService": "http://vitalem.com/terms/",
+        "contact": {
+            "name": "API Support",
+            "url": "http://vitalem.com/support",
+            "email": "support@vitalem.com"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
+        "version": "{{.Version}}"
+    },
+    "host": "{{.Host}}",
+    "basePath": "{{.BasePath}}",
+    "paths": {
+        "/openai/status": {
+            "get": {
+                "description": "Get current OpenAI client configuration and available endpoints",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Get OpenAI client status",
+                "responses": {
+                    "200": {
+                        "description": "OpenAI status and configuration",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/openai/test/audio-transcription": {
+            "post": {
+                "description": "Transcribe audio files using OpenAI's Whisper model",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Transcribe audio using Whisper",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Audio file to transcribe",
+                        "name": "audio",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Audio language (en, ru, kz)",
+                        "name": "language",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Whisper model to use",
+                        "name": "model",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Transcription response",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/openai/test/image-generation": {
+            "post": {
+                "description": "Generate images using OpenAI's GPT Image (gpt-image-1) model with advanced features",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Generate images using GPT Image",
+                "parameters": [
+                    {
+                        "description": "Image generation parameters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ImageGenerationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Generated image response",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/openai/test/text-generation": {
+            "post": {
+                "description": "Generate text using OpenAI's GPT-4.1 model with customizable parameters",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Generate text using GPT-4.1",
+                "parameters": [
+                    {
+                        "description": "Text generation parameters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TextGenerationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Generated text response",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/openai/test/vision-analysis": {
+            "post": {
+                "description": "Analyze images using OpenAI's GPT-4.1 vision capabilities",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Analyze images using GPT-4.1 Vision",
+                "parameters": [
+                    {
+                        "description": "Vision analysis parameters",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VisionAnalysisRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Image analysis response",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/openai/test/vision-analysis-file": {
+            "post": {
+                "description": "Analyze uploaded image files using GPT-4.1 vision capabilities",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Analyze uploaded image files",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Image file to analyze",
+                        "name": "image",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Analysis prompt",
+                        "name": "prompt",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Response language (en, ru, kz)",
+                        "name": "language",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Detail level (low, high, auto)",
+                        "name": "detail_level",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Vision model to use",
+                        "name": "model",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Image analysis response",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "handlers.ImageGenerationRequest": {
+            "type": "object",
+            "required": [
+                "prompt"
+            ],
+            "properties": {
+                "background": {
+                    "type": "string"
+                },
+                "input_fidelity": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "moderation": {
+                    "type": "string"
+                },
+                "n": {
+                    "type": "integer"
+                },
+                "output_compression": {
+                    "type": "integer"
+                },
+                "output_format": {
+                    "type": "string"
+                },
+                "prompt": {
+                    "type": "string"
+                },
+                "quality": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "string"
+                },
+                "style": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.TextGenerationRequest": {
+            "type": "object",
+            "required": [
+                "input"
+            ],
+            "properties": {
+                "input": {
+                    "type": "string"
+                },
+                "instructions": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "temperature": {
+                    "type": "number"
+                }
+            }
+        },
+        "handlers.VisionAnalysisRequest": {
+            "type": "object",
+            "required": [
+                "prompt"
+            ],
+            "properties": {
+                "detail_level": {
+                    "type": "string"
+                },
+                "image_base64": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "prompt": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Type \"Bearer\" followed by a space and JWT token.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}`
+
+var SwaggerInfo = &swag.Spec{
+	Version:          "1.0",
+	Host:             "localhost:8080",
+	BasePath:         "/",
+	Schemes:          []string{"http", "https"},
+	Title:            "Clintech API",
+	Description:      "Medical AI API for health analysis and OpenAI integration with GPT-4.1 capabilities",
+	InfoInstanceName: "swagger",
+	SwaggerTemplate:  docTemplate,
+	LeftDelim:        "{{",
+	RightDelim:       "}}",
+}
+
+func init() {
+	swag.Register(SwaggerInfo.InstanceName(), SwaggerInfo)
+}

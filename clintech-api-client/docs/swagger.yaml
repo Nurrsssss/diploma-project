@@ -1,0 +1,291 @@
+basePath: /
+definitions:
+  handlers.ImageGenerationRequest:
+    properties:
+      background:
+        type: string
+      input_fidelity:
+        type: string
+      model:
+        type: string
+      moderation:
+        type: string
+      "n":
+        type: integer
+      output_compression:
+        type: integer
+      output_format:
+        type: string
+      prompt:
+        type: string
+      quality:
+        type: string
+      size:
+        type: string
+      style:
+        type: string
+    required:
+    - prompt
+    type: object
+  handlers.TextGenerationRequest:
+    properties:
+      input:
+        type: string
+      instructions:
+        type: string
+      language:
+        type: string
+      max_tokens:
+        type: integer
+      model:
+        type: string
+      temperature:
+        type: number
+    required:
+    - input
+    type: object
+  handlers.VisionAnalysisRequest:
+    properties:
+      detail_level:
+        type: string
+      image_base64:
+        type: string
+      image_url:
+        type: string
+      language:
+        type: string
+      model:
+        type: string
+      prompt:
+        type: string
+    required:
+    - prompt
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@clintech.com
+    name: API Support
+    url: http://clintech.com/support
+  description: Medical AI API for health analysis and OpenAI integration with GPT-4.1
+    capabilities
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://clintech.com/terms/
+  title: Clintech API
+  version: "1.0"
+paths:
+  /openai/status:
+    get:
+      description: Get current OpenAI client configuration and available endpoints
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OpenAI status and configuration
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get OpenAI client status
+      tags:
+      - OpenAI
+  /openai/test/audio-transcription:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Transcribe audio files using OpenAI's Whisper model
+      parameters:
+      - description: Audio file to transcribe
+        in: formData
+        name: audio
+        required: true
+        type: file
+      - description: Audio language (en, ru, kz)
+        in: formData
+        name: language
+        type: string
+      - description: Whisper model to use
+        in: formData
+        name: model
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Transcription response
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Transcribe audio using Whisper
+      tags:
+      - OpenAI
+  /openai/test/image-generation:
+    post:
+      consumes:
+      - application/json
+      description: Generate images using OpenAI's GPT Image (gpt-image-1) model with
+        advanced features
+      parameters:
+      - description: Image generation parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ImageGenerationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Generated image response
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Generate images using GPT Image
+      tags:
+      - OpenAI
+  /openai/test/text-generation:
+    post:
+      consumes:
+      - application/json
+      description: Generate text using OpenAI's GPT-4.1 model with customizable parameters
+      parameters:
+      - description: Text generation parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.TextGenerationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Generated text response
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Generate text using GPT-4.1
+      tags:
+      - OpenAI
+  /openai/test/vision-analysis:
+    post:
+      consumes:
+      - application/json
+      description: Analyze images using OpenAI's GPT-4.1 vision capabilities
+      parameters:
+      - description: Vision analysis parameters
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.VisionAnalysisRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Image analysis response
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Analyze images using GPT-4.1 Vision
+      tags:
+      - OpenAI
+  /openai/test/vision-analysis-file:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Analyze uploaded image files using GPT-4.1 vision capabilities
+      parameters:
+      - description: Image file to analyze
+        in: formData
+        name: image
+        required: true
+        type: file
+      - description: Analysis prompt
+        in: formData
+        name: prompt
+        required: true
+        type: string
+      - description: Response language (en, ru, kz)
+        in: formData
+        name: language
+        type: string
+      - description: Detail level (low, high, auto)
+        in: formData
+        name: detail_level
+        type: string
+      - description: Vision model to use
+        in: formData
+        name: model
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Image analysis response
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Analyze uploaded image files
+      tags:
+      - OpenAI
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

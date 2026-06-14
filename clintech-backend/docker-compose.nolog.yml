@@ -1,0 +1,412 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: clintech_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: 61324
+      POSTGRES_USER: postgres
+      POSTGRES_DB: clintech_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: clintech_rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  identity_service:
+    build:
+      context: .
+      dockerfile: ./identity_service/Dockerfile
+    container_name: identity_service
+    restart: unless-stopped
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASS=61324
+      - DB_NAME=clintech_db
+      - DB_SSL_MODE=disable
+      - PATIENT_SERVICE_URL=http://patient_service:8804
+      - RMQ_HOST=rabbitmq
+      - RMQ_PORT=5672
+      - RMQ_USER=guest
+      - RMQ_PASS=guest
+      - RMQ_EXCHANGE=clintech
+      - RMQ_USER_QUEUE=user.events
+      - RMQ_ROUTING_KEY=user.created
+      - JWT_SECRET=4324pkh23sk4jh342alhdlfl2sdjf
+      - JWT_EXPIRE=168
+      - LOG_LEVEL=warn
+    ports:
+      - "8801:8801"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  specialist_service:
+    build:
+      context: .
+      dockerfile: ./specialist_service/Dockerfile
+    container_name: specialist_service
+    restart: unless-stopped
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASS=61324
+      - DB_NAME=clintech_db
+      - DB_SSL_MODE=disable
+      - RMQ_HOST=rabbitmq
+      - RMQ_PORT=5672
+      - RMQ_USER=guest
+      - RMQ_PASS=guest
+      - RMQ_EXCHANGE=clintech
+      - RMQ_DOCTOR_QUEUE=doctor.events
+      - RMQ_USER_QUEUE=user.events
+      - RMQ_ROUTING_KEY=user.created
+      - JWT_SECRET=4324pkh23sk4jh342alhdlfl2sdjf
+      - JWT_EXPIRE=168
+      - LOG_LEVEL=warn
+    ports:
+      - "8803:8803"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      identity_service:
+        condition: service_started
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  patient_service:
+    build:
+      context: .
+      dockerfile: ./patient_service/Dockerfile
+    container_name: patient_service
+    restart: unless-stopped
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASS=61324
+      - DB_NAME=clintech_db
+      - DB_SSL_MODE=disable
+      - RMQ_HOST=rabbitmq
+      - RMQ_PORT=5672
+      - RMQ_USER=guest
+      - RMQ_PASS=guest
+      - RMQ_EXCHANGE=clintech
+      - RMQ_PATIENT_QUEUE=patient.events
+      - RMQ_USER_QUEUE=user.events
+      - RMQ_ROUTING_KEY=user.created
+      - JWT_SECRET=4324pkh23sk4jh342alhdlfl2sdjf
+      - JWT_EXPIRE=168
+      - LOG_LEVEL=warn
+    ports:
+      - "8804:8804"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      identity_service:
+        condition: service_started
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  appointment_service:
+    build:
+      context: .
+      dockerfile: ./appointment_service/Dockerfile
+    container_name: appointment_service
+    restart: unless-stopped
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=61324
+      - DB_NAME=clintech_db
+      - DB_SSLMODE=disable
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - RABBITMQ_EXCHANGE=notification.events
+      - RABBITMQ_ROUTING_KEY=appointment.booked
+      - NOTIFICATION_URL=http://notification_service:8806/api/v1
+      - JWT_SECRET=4324pkh23sk4jh342alhdlfl2sdjf
+      - JWT_EXPIRE=168
+      - CONSOLE_LOG_LEVEL=warn
+      - SERVICE_LOG_LEVEL=warn
+    ports:
+      - "8805:8805"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      notification_service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8805/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  notification_service:
+    build:
+      context: .
+      dockerfile: ./NotificationService/Dockerfile
+    container_name: notification_service
+    restart: unless-stopped
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=61324
+      - DB_NAME=clintech_db
+      - DB_SSL_MODE=disable
+      - JWT_SECRET=your-super-secret-jwt-key-here-change-in-production
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - SMTP_HOST=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_USERNAME=your-email@gmail.com
+      - SMTP_PASSWORD=your-app-password
+      - SMTP_FROM=noreply@clintech.com
+      - TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+      - TELEGRAM_CHAT_ID=-4705009453
+      - SMS_PROVIDER=smsc
+      - SMS_SMSC_LOGIN=clintech
+      - SMS_SMSC_PASSWORD=123QWEqwe!
+      - SMS_SMSC_API_URL=https://smsc.kz/rest/send/
+      - SMS_SMSC_SENDER=clintech
+      - WHATSAPP_ENABLED=false
+      - WHATSAPP_ACCOUNT_SID=ACf6a94ac70e2b2e0d8e3eeff79af33178
+      - WHATSAPP_AUTH_TOKEN=3192906f83f9fb008cd4b2865a9fc043
+      - WHATSAPP_FROM_NUMBER=whatsapp:+15557383462
+    ports:
+      - "8806:8806"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  fileserver_service:
+    build:
+      context: .
+      dockerfile: ./FileServerService/Dockerfile
+    container_name: fileserver_service
+    restart: unless-stopped
+    environment:
+      - SERVER_PORT=8087
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=61324
+      - DB_NAME=clintech_db
+      - DB_SSLMODE=disable
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_USE_SSL=false
+      - JWT_SECRET=4324pkh23sk4jh342alhdlfl2sdjf
+      - JWT_EXPIRE=168
+      - LOG_LEVEL=warn
+    ports:
+      - "8087:8087"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8087/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  gateway_service:
+    build:
+      context: .
+      dockerfile: ./gateway_service/Dockerfile
+    container_name: gateway_service
+    restart: unless-stopped
+    environment:
+      - GATEWAY_HOST=0.0.0.0
+      - GATEWAY_PORT=8800
+      - JWT_SECRET=4324pkh23sk4jh342alhdlfl2sdjf
+      - JWT_EXPIRE=168
+      - LOG_LEVEL=warn
+      - PUBLIC_BASE_URL=https://clintech.nutristeppe.com
+      - IDENTITY_SERVICE_URL=http://identity_service:8801
+      - PATIENT_SERVICE_URL=http://patient_service:8804
+      - SPECIALIST_SERVICE_URL=http://specialist_service:8803
+      - APPOINTMENT_SERVICE_URL=http://appointment_service:8805
+      - NOTIFICATION_SERVICE_URL=http://notification_service:8806
+      - FILESERVER_SERVICE_URL=http://fileserver_service:8087
+    ports:
+      - "8800:8800"
+    depends_on:
+      identity_service:
+        condition: service_started
+      specialist_service:
+        condition: service_started
+      patient_service:
+        condition: service_started
+      appointment_service:
+        condition: service_started
+      notification_service:
+        condition: service_started
+      fileserver_service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "ps aux | grep -v grep | grep -q gateway"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  swagger-ui:
+    image: swaggerapi/swagger-ui
+    container_name: clintech_swagger_ui
+    restart: unless-stopped
+    environment:
+      - SWAGGER_JSON=/swagger.yaml
+      - DOC_EXPANSION=none
+      - DEEP_LINKING=true
+      - DISPLAY_REQUEST_DURATION=true
+      - SHOW_EXTENSIONS=true
+      - SHOW_COMMON_EXTENSIONS=true
+    volumes:
+      - ./gateway_service/docs/swagger.yaml:/swagger.yaml:ro
+    ports:
+      - "8808:8080"
+    depends_on:
+      gateway_service:
+        condition: service_started
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  minio:
+    image: minio/minio:latest
+    container_name: clintech_minio
+    restart: unless-stopped
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  minio_data:
+

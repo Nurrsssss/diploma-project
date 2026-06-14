@@ -1,0 +1,32 @@
+server:
+  host: "0.0.0.0"
+  port: "8805"
+
+database:
+  host: "postgres"
+  port: "5432"
+  user: "postgres"
+  password: "61324"
+  db_name: "clintech_db"
+  ssl_mode: "disable"
+
+rabbitmq:
+  url: amqp://guest:guest@localhost:5672/
+  exchange: notification.events
+  routing_key: appointment.booked
+
+logging:
+  console_level: error   # Уровень логов для консоли
+  service_level: info   # Уровень логов для logger_service
+  service_url: http://logger_service:8802
+
+app:
+  name: "appointment-service"
+  version: "1.0.0"
+  environment: "development"
+
+auth:
+  jwt_secret: "4324pkh23sk4jh342alhdlfl2sdjf"
+
+meeting:
+  platform_url: https://meet.clintech.kz 

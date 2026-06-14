@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Медицинский документ пациента</title>
+    <style>
+      @page { size: A4; margin: 1.5cm; }
+
+      * { box-sizing: border-box; }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-size: 11pt; line-height: 1.6; color: #2d3748;
+        margin: 0; padding: 0; background: #f8fafc;
+      }
+
+      .document { max-width: 100%; margin: 0 auto; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,.05); }
+
+      /* Header */
+      .header {
+        background: linear-gradient(135deg, #4299e1 0%, #3182ce 50%, #2b77cb 100%);
+        color:#fff; padding: 28px 30px 18px; text-align: center; position: relative; overflow: hidden;
+      }
+      .header::before {
+        content:""; position:absolute; inset:0;
+        background:url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="g" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="20" cy="20" r="1" fill="rgba(255,255,255,0.05)"/><circle cx="80" cy="80" r="1" fill="rgba(255,255,255,0.05)"/><circle cx="40" cy="70" r="1" fill="rgba(255,255,255,0.05)"/><circle cx="90" cy="40" r="1" fill="rgba(255,255,255,0.05)"/></pattern></defs><rect width="100" height="100" fill="url(%23g)"/></svg>');
+        opacity:.3;
+      }
+      .header-content { position: relative; z-index: 1; }
+      .header h1 { font-size: 26pt; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.5px; }
+      .header h2 { font-size: 14pt; font-weight: 300; margin: 0; opacity:.9; }
+      .doc-number {
+        position:absolute; top:16px; right:16px; background:rgba(255,255,255,.18);
+        padding:6px 12px; border-radius: 16px; font-size:10pt; backdrop-filter: blur(8px);
+      }
+
+      /* Vitals strip in header */
+      .metrics-strip {
+        margin: 14px auto 0; display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
+      }
+      .metric {
+        background: rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25);
+        color:#fff; padding:6px 10px; border-radius:999px; font-size:10pt; display:flex; align-items:center; gap:6px;
+        backdrop-filter: blur(8px);
+      }
+      .metric .m-label { opacity:.9; font-weight:600; }
+      .metric .m-value { font-weight:600; }
+
+      /* Content */
+      .content { padding: 26px 30px; }
+
+      /* Patient card */
+      .patient-card {
+        background:#fff; border-radius:12px; padding:20px; margin-bottom:22px;
+        box-shadow:0 2px 4px rgba(0,0,0,.06); border:1px solid #e2e8f0; border-left:4px solid #4299e1;
+      }
+      .patient-card h2 { color:#2d3748; font-size:14pt; font-weight:700; margin:0 0 14px; display:flex; align-items:center; }
+      .patient-card h2::before { content:"👤"; margin-right:8px; font-size:16pt; }
+      .patient-info-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:12px; }
+      .patient-info-item { display:flex; flex-direction:column; gap:3px; }
+      .patient-info-label { font-size:9pt; color:#718096; font-weight:600; text-transform:uppercase; letter-spacing:.5px; }
+      .patient-info-value { font-size:11pt; color:#2d3748; font-weight:500; }
+
+      /* Doctor card */
+      .doctor-card { background:#f7fafc; border-radius:8px; padding:16px; border:1px solid #e2e8f0; }
+      .doctor-card h3 { color:#4299e1; font-size:12pt; font-weight:700; margin:0 0 10px; display:flex; align-items:center; }
+      .doctor-card h3::before { content:"👨‍⚕"; margin-right:8px; }
+      .doctor-info { display:grid; grid-template-columns: repeat(2,1fr); gap:10px; }
+      .doctor-info-item { font-size:10pt; }
+      .doctor-info-item strong { color:#4299e1; font-weight:700; }
+
+      /* Section cards */
+      .section-card { background:#fff; border-radius:12px; margin:0 0 22px; box-shadow:0 2px 4px rgba(0,0,0,.06); border:1px solid #e2e8f0; overflow:hidden; }
+      .section-header { background: linear-gradient(90deg,#4299e1 0%,#3182ce 100%); color:#fff; padding:12px 20px; }
+      .section-header h3 { margin:0; font-size:13pt; font-weight:700; display:flex; align-items:center; }
+      .section-content { padding:18px 20px; line-height:1.7; color:#4a5568; }
+      .section-content h4 { color:#2d3748; font-size:11.5pt; font-weight:700; margin:16px 0 8px; }
+      .section-content p { margin:0 0 12px; }
+      .section-content ul { margin:8px 0 8px 18px; padding:0; }
+      .section-content li { margin-bottom:6px; }
+
+      /* Info boxes */
+      .medical-info-box {
+        background:#f7fafc; border:1px solid #e2e8f0; border-left:4px solid #4299e1; border-radius:0 8px 8px 0;
+        padding:14px; margin:14px 0;
+      }
+      .medical-info-box h4 { color:#2d3748; font-size:11pt; font-weight:700; margin:0 0 8px; }
+
+      /* Files analysis */
+      .files-analysis-content { background:#f7fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-top:10px; }
+
+      /* Footer */
+      .footer { margin-top: 20px; padding: 16px; text-align:center; background:#f7fafc; border-top:1px solid #e2e8f0; color:#718096; font-size:9pt; }
+      .footer .generation-info { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; margin-bottom:10px; display:inline-block; }
+
+      .page-break { page-break-before: always; }
+
+      @media print {
+        .document { box-shadow: none; }
+        .header, .section-header {
+          -webkit-print-color-adjust: exact; print-color-adjust: exact;
+        }
+        .patient-card, .section-card { box-shadow: none; border:1px solid #e2e8f0; }
+      }
+      .id-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+  }
+  .id-table th,
+  .id-table td {
+    border: 1px solid #e2e8f0;
+    padding: 6px 10px;
+    vertical-align: top;
+  }
+  .id-table th {
+    width: 28%;
+    background: #f7fafc;
+    color: #718096;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    font-size: 8.5pt;
+  }
+  .id-table td {
+    width: 22%;
+    font-size: 9.5pt;
+  }
+  .id-table tr:nth-child(even) td { background: #fbfdff; }
+    </style>
+  </head>
+  <body>
+    <div class="document">
+      <!-- Content -->
+      <div class="content">
+        <!-- Patient -->
+        <div class="patient-card">
+          <h2>Идентификационная информация</h2>
+        
+          <table class="id-table">
+            <tbody>
+              <tr>
+                <th>Фамилия Имя Отчество</th>
+                <td>{{.Patient.LastName}} {{.Patient.FirstName}} {{.Patient.MiddleName}}</td>
+                <th>Дата рождения</th>
+                <td>{{dateOnly .Patient.BirthDate}} ({{.Patient.Age}} лет)</td>
+              </tr>
+              <tr>
+                <th>Пол</th>
+                <td>{{.Patient.Gender}}</td>
+                <th>ИИН</th>
+                <td>{{.Patient.IIN}}</td>
+              </tr>
+              <tr>
+                <th>Телефон</th>
+                <td>{{.Patient.Phone}}</td>
+                <th>Email</th>
+                <td>{{.Patient.Email}}</td>
+              </tr>
+              <tr>
+                <th>Адрес</th>
+                <td>{{.Patient.Address}}</td>
+                <th>Антропометрия</th>
+                <td>Рост: {{.Patient.Height}} см, Вес: {{.Patient.Weight}} кг</td>
+              </tr>
+              {{if or .Patient.Temperature .Patient.BPString .Patient.Pulse}}
+              <tr>
+                {{if .Patient.Temperature}}
+                <th>Температура</th>
+                <td>{{printf "%.1f" .Patient.Temperature}} °C</td>
+                {{else}}
+                <th></th><td></td>
+                {{end}}
+                {{if and .Patient.SystolicBP .Patient.DiastolicBP}}
+                <th>АД</th>
+                <td>{{.Patient.SystolicBP}} / {{.Patient.DiastolicBP}} мм рт. ст.</td>
+                {{else if .Patient.BPString}}
+                <th>АД</th>
+                <td>{{.Patient.BPString}} мм рт. ст.</td>
+                {{else if .Patient.Pulse}}
+                <th>Пульс</th>
+                <td>{{.Patient.Pulse}} уд/мин</td>
+                {{else}}
+                <th></th><td></td>
+                {{end}}
+              </tr>
+              {{if and .Patient.Pulse (or .Patient.Temperature .Patient.BPString)}}
+              <tr>
+                <th>Пульс</th>
+                <td>{{.Patient.Pulse}} уд/мин</td>
+                <th></th><td></td>
+              </tr>
+              {{end}}
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        
+
+        <!-- Doctor -->
+        <div class="doctor-card" style="margin-bottom:22px">
+          <h3>Лечащий врач</h3>
+          <div class="doctor-info">
+            <div class="doctor-info-item"><strong>ФИО:</strong> {{.Doctor.LastName}} {{.Doctor.FirstName}} {{.Doctor.MiddleName}}</div>
+            <div class="doctor-info-item"><strong>Роль(и):</strong> {{range $i, $r := .Doctor.Roles}}{{if $i}}, {{end}}{{$r}}{{end}}</div>
+            <div class="doctor-info-item"><strong>Телефон:</strong> {{.Doctor.Phone}}</div>
+            <div class="doctor-info-item"><strong>Email:</strong> {{.Doctor.Email}}</div>
+          </div>
+        </div>
+
+        <!-- 1) Жалобы -->
+        {{if not (isEmptyHTML .Complaints)}}
+        <div class="section-card">
+          <div class="section-header"><h3>Жалобы</h3></div>
+          <div class="section-content">{{.Complaints}}</div>
+        </div>
+        {{end}}
+
+        <!-- 2) Анамнез заболевания -->
+        {{if or (not (isEmptyHTML .MedicalHistory)) (not (isEmptyHTML .MedicalHistoryDynamics)) (not (isEmptyHTML .TreatmentEffect))}}
+        <div class="section-card">
+          <div class="section-header"><h3>Анамнез заболевания</h3></div>
+          <div class="section-content">
+            {{if not (isEmptyHTML .MedicalHistory)}}
+              <div>{{.MedicalHistory}}</div>
+            {{end}}
+
+            {{if not (isEmptyHTML .MedicalHistoryDynamics)}}
+              <h4>Динамика развития</h4>
+              <div>{{.MedicalHistoryDynamics}}</div>
+            {{end}}
+
+            {{if not (isEmptyHTML .TreatmentEffect)}}
+              <h4>Лечение по данному поводу и эффект</h4>
+              <div>{{.TreatmentEffect}}</div>
+            {{end}}
+          </div>
+        </div>
+        {{end}}
+
+        <!-- 3) Анамнез жизни -->
+        <div class="section-card">
+          <div class="section-header"><h3>Анамнез жизни</h3></div>
+          <div class="section-content">
+            {{if .Lifestyle}}
+              {{.Lifestyle}}
+            {{else}}
+              <p>1. Перенесенные заболевания: отсутствуют</p>
+              <p>2. Операции: отсутствуют</p>
+              <p>3. Аллергии: отсутствуют</p>
+              <p>4. Наследственность: отсутствует</p>
+              <p>5. Вредные привычки: отсутствуют</p>
+              <p>6. Гинекологический анамнез: отсутствует</p>
+              <p>7. Какие препараты принимает в данное время: отсутствуют</p>
+            {{end}}
+          </div>
+        </div>
+
+        <!-- 4) Объективный статус -->
+        {{if or (not (isEmptyHTML .CurrentState)) (not (isEmptyHTML .ObjectiveStatus)) (not (isEmptyHTML .GeneralConclusion)) true}}
+        <div class="section-card">
+          <div class="section-header"><h3>Объективный статус</h3></div>
+          <div class="section-content">
+            {{/* 1) Текущее состояние - перемещено из анамнеза жизни */}}
+            {{if not (isEmptyHTML .CurrentState)}}
+              <h4>Текущее состояние</h4>
+              <div>{{.CurrentState}}</div>
+            {{end}}
+        
+            {{/* 2) Объективный статус (Stanford 25) */}}
+            {{if or (not (isEmptyHTML .ObjectiveStatus)) (not (isEmptyHTML .GeneralConclusion))}}
+              <h4>Объективный статус</h4>
+              <div>
+                {{if not (isEmptyHTML .ObjectiveStatus)}}
+                  {{.ObjectiveStatus}}
+                {{else if not (isEmptyHTML .GeneralConclusion)}}
+                  {{.GeneralConclusion}}
+                {{end}}
+              </div>
+            {{end}}
+        
+            {{/* 3) Диагноз - всегда отображается */}}
+            <h4>Диагноз</h4>
+            {{if and .DiagnosisMain (ne (trim .DiagnosisMain) "")}}
+              <p><strong>Основной:</strong> {{.DiagnosisMain}}</p>
+            {{else}}
+              <p><strong>Основной:</strong> не установлен</p>
+            {{end}}
+            {{if and .DiagnosisComorbid (gt (len .DiagnosisComorbid) 0)}}
+              <p><strong>Сопутствующие:</strong>
+                <ul>
+                  {{range .DiagnosisComorbid}}<li>{{.}}</li>{{end}}
+                </ul>
+              </p>
+            {{else}}
+              <p><strong>Сопутствующие:</strong> отсутствуют</p>
+            {{end}}
+          </div>
+        </div>
+        {{end}}
+
+        <!-- 5) Анализ медицинских файлов -->
+        <div class="section-card">
+          <div class="section-header"><h3>Анализ медицинских файлов</h3></div>
+          <div class="section-content">
+            {{if .FilesAnalysis}}
+              <div class="files-analysis-content">{{.FilesAnalysis}}</div>
+            {{else}}
+              <div class="files-analysis-content">
+                <p style="color:#718096; font-style:italic">Файлы для анализа не найдены.</p>
+              </div>
+            {{end}}
+          </div>
+        </div>
+
+        <!-- 6) План обследования -->
+        {{if not (isEmptyHTML .PlanExam)}}
+        <div class="section-card">
+          <div class="section-header"><h3>План обследования</h3></div>
+          <div class="section-content">{{.PlanExam}}</div>
+        </div>
+        {{end}}
+
+        <!-- 7) План лечения -->
+        {{if not (isEmptyHTML .PlanTreatment)}}
+        <div class="section-card">
+          <div class="section-header"><h3>План лечения</h3></div>
+          <div class="section-content">{{.PlanTreatment}}</div>
+        </div>
+        {{end}}
+
+        <!-- 8) Общие рекомендации -->
+        {{if not (isEmptyHTML .PlanGeneral)}}
+        <div class="section-card">
+          <div class="section-header"><h3>Общие рекомендации</h3></div>
+          <div class="section-content">{{.PlanGeneral}}</div>
+        </div>
+        {{end}}
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        <div class="generation-info"><strong>Дата создания документа:</strong> {{.GeneratedAt}}</div>
+        <p>Документ сформирован автоматически на основе предоставленной медицинской информации.<br/>Для разъяснений и коррекций обратитесь к лечащему врачу.</p>
+      </div>
+    </div>
+  </body>
+</html>

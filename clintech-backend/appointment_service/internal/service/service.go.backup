@@ -1,0 +1,1877 @@
+package service
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"strings"
+	"time"
+
+	"context"
+
+	"github.com/dgrijalva/jwt-go"
+	"github.com/google/uuid"
+	"github.com/printprince/vitalem/appointment_service/internal/models"
+	"github.com/printprince/vitalem/appointment_service/internal/repository"
+	"github.com/printprince/vitalem/logger_service/pkg/logger"
+)
+
+// AppointmentService - интерфейс сервиса
+type AppointmentService interface {
+	// Schedules
+	CreateSchedule(doctorID uuid.UUID, req *models.CreateScheduleRequest) (*models.CreateScheduleResponse, error)
+	GetDoctorSchedules(doctorID uuid.UUID) ([]*models.ScheduleResponse, error)
+	UpdateSchedule(doctorID, scheduleID uuid.UUID, req *models.UpdateScheduleRequest) (*models.ScheduleResponse, error)
+	DeleteSchedule(doctorID, scheduleID uuid.UUID) error
+	ToggleSchedule(doctorID, scheduleID uuid.UUID, req *models.ToggleScheduleRequest, hasRequestBody bool) (*models.ScheduleResponse, error)
+
+	// Appointments
+	GetAvailableSlots(doctorID uuid.UUID, date string) ([]*models.AvailableSlot, error)
+	BookAppointment(patientID, appointmentID uuid.UUID, req *models.BookAppointmentRequest) (*models.AppointmentResponse, error)
+	CancelAppointment(patientID, appointmentID uuid.UUID) error
+	UpdateAppointment(doctorID, appointmentID uuid.UUID, req *models.UpdateAppointmentRequest) (*models.AppointmentResponse, error)
+	GetDoctorAppointments(doctorID uuid.UUID) ([]*models.AppointmentResponse, error)
+	GetDoctorAppointmentByID(doctorID, appointmentID uuid.UUID) (*models.AppointmentResponse, error)
+	GetPatientAppointments(patientID uuid.UUID) ([]*models.AppointmentResponse, error)
+	GetPatientAppointmentByID(patientID, appointmentID uuid.UUID) (*models.AppointmentResponse, error)
+
+	// Exceptions
+	AddException(doctorID uuid.UUID, req *models.AddExceptionRequest) (*models.ExceptionResponse, error)
+	GetDoctorExceptions(doctorID uuid.UUID, startDate, endDate string) ([]*models.ExceptionResponse, error)
+
+	// Appointment Files
+	UploadAppointmentFile(userID uuid.UUID, userRole string, appointmentID uuid.UUID, fileData []byte, fileName, mimeType, fileType, name string) (*models.AppointmentFileResponse, error)
+	GetAppointmentFiles(userID uuid.UUID, userRole string, appointmentID uuid.UUID) ([]*models.AppointmentFileResponse, error)
+	DeleteAppointmentFile(userID uuid.UUID, userRole string, appointmentID, fileID uuid.UUID) error
+	DownloadAppointmentFile(userID uuid.UUID, userRole string, appointmentID, fileID uuid.UUID) ([]byte, string, string, error)
+	CheckAppointmentAccess(userID uuid.UUID, userRole string, appointmentID uuid.UUID) (bool, error)
+}
+
+// appointmentService - реализация сервиса
+type appointmentService struct {
+	repo           repository.AppointmentRepository
+	logger         *logger.Client
+	jwtSecret      string
+	messageService MessageService
+	httpClient     *http.Client
+	identityURL    string
+	specialistURL  string
+}
+
+// NewAppointmentService - создание нового сервиса
+func NewAppointmentService(repo repository.AppointmentRepository, loggerClient *logger.Client, jwtSecret string, messageService MessageService) AppointmentService {
+	return &appointmentService{
+		repo:           repo,
+		logger:         loggerClient,
+		jwtSecret:      jwtSecret,
+		messageService: messageService,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+		identityURL:   "http://identity_service:8801",
+		specialistURL: "http://specialist_service:8803",
+	}
+}
+
+// SetLogger - устанавливает логгер для сервиса (deprecated, используйте NewAppointmentService)
+func (s *appointmentService) SetLogger(loggerClient *logger.Client) {
+	s.logger = loggerClient
+}
+
+// logInfo - вспомогательный метод для информационного логирования
+func (s *appointmentService) logInfo(message string, metadata map[string]interface{}) {
+	if s.logger != nil {
+		s.logger.Info(message, metadata)
+	}
+}
+
+// logError - вспомогательный метод для логирования ошибок
+func (s *appointmentService) logError(message string, metadata map[string]interface{}) {
+	if s.logger != nil {
+		s.logger.Error(message, metadata)
+	}
+}
+
+// === SCHEDULES ===
+
+func (s *appointmentService) CreateSchedule(doctorID uuid.UUID, req *models.CreateScheduleRequest) (*models.CreateScheduleResponse, error) {
+	s.logInfo("Creating schedule for doctor", map[string]interface{}{
+		"doctorID":     doctorID.String(),
+		"scheduleName": req.Name,
+		"daysCount":    len(req.Days),
+	})
+
+	// При создании нового расписания ВСЕГДА деактивируем все существующие
+	// чтобы у врача было только одно активное расписание
+	s.logInfo("Deactivating all existing schedules for single active schedule policy", map[string]interface{}{
+		"doctorID": doctorID.String(),
+	})
+
+	if err := s.deactivateOtherSchedules(doctorID); err != nil {
+		s.logError("Failed to deactivate existing schedules", map[string]interface{}{
+			"doctorID": doctorID.String(),
+			"error":    err.Error(),
+		})
+		return nil, fmt.Errorf("failed to deactivate existing schedules: %w", err)
+	}
+
+	// Создаем основное расписание
+	schedule := &models.DoctorSchedule{
+		DoctorID:          doctorID,
+		Name:              req.Name,
+		SlotDuration:      req.SlotDuration,
+		SlotTitle:         req.SlotTitle,
+		AppointmentFormat: req.AppointmentFormat,
+		IsActive:          true, // Новое расписание всегда активно
+	}
+
+	if err := s.repo.CreateSchedule(schedule); err != nil {
+		s.logError("Failed to create schedule in repository", map[string]interface{}{
+			"doctorID": doctorID.String(),
+			"error":    err.Error(),
+		})
+		return nil, fmt.Errorf("failed to create schedule: %w", err)
+	}
+
+	// Создаем дни недели для расписания
+	for _, dayDTO := range req.Days {
+		day := &models.ScheduleDay{
+			ScheduleID:   schedule.ID,
+			DayOfWeek:    dayDTO.DayOfWeek,
+			StartTime:    dayDTO.StartTime,
+			EndTime:      dayDTO.EndTime,
+			BreakStart:   dayDTO.BreakStart,
+			BreakEnd:     dayDTO.BreakEnd,
+			IsWorkingDay: dayDTO.IsWorkingDay,
+		}
+
+		if err := s.repo.CreateScheduleDay(day); err != nil {
+			s.logError("Failed to create schedule day", map[string]interface{}{
+				"scheduleID": schedule.ID.String(),
+				"dayOfWeek":  dayDTO.DayOfWeek,
+				"error":      err.Error(),
+			})
+			return nil, fmt.Errorf("failed to create schedule day: %w", err)
+		}
+	}
+
+	s.logInfo("Schedule created successfully", map[string]interface{}{
+		"doctorID":   doctorID.String(),
+		"scheduleID": schedule.ID.String(),
+		"isActive":   schedule.IsActive,
+		"daysCount":  len(req.Days),
+	})
+
+	// Получаем полное расписание с днями для ответа
+	fullSchedule, err := s.repo.GetScheduleByID(schedule.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get created schedule: %w", err)
+	}
+
+	response := &models.CreateScheduleResponse{
+		Schedule: s.scheduleToResponse(fullSchedule),
+	}
+
+	return response, nil
+}
+
+// checkScheduleConflicts проверяет конфликты времени с существующими активными расписаниями
+func (s *appointmentService) checkScheduleConflicts(doctorID uuid.UUID, req *models.CreateScheduleRequest) error {
+	existingSchedules, err := s.repo.GetDoctorSchedules(doctorID)
+	if err != nil {
+		return fmt.Errorf("failed to get existing schedules: %w", err)
+	}
+
+	// Проверяем конфликты для каждого дня недели
+	for _, dayDTO := range req.Days {
+		if !dayDTO.IsWorkingDay {
+			continue // пропускаем нерабочие дни
+		}
+
+		startTime, err := time.Parse("15:04", dayDTO.StartTime)
+		if err != nil {
+			return fmt.Errorf("invalid start time format for day %d: %w", dayDTO.DayOfWeek, err)
+		}
+
+		endTime, err := time.Parse("15:04", dayDTO.EndTime)
+		if err != nil {
+			return fmt.Errorf("invalid end time format for day %d: %w", dayDTO.DayOfWeek, err)
+		}
+
+		for _, existing := range existingSchedules {
+			if !existing.IsActive {
+				continue // пропускаем неактивные расписания
+			}
+
+			// Проверяем конфликт для конкретного дня недели
+			for _, existingDay := range existing.Days {
+				if existingDay.DayOfWeek == dayDTO.DayOfWeek && existingDay.IsWorkingDay {
+					existingStart, _ := time.Parse("15:04", existingDay.StartTime)
+					existingEnd, _ := time.Parse("15:04", existingDay.EndTime)
+
+					// Проверяем пересечение времени
+					if s.hasTimeConflict(startTime, endTime, existingStart, existingEnd) {
+						return fmt.Errorf("schedule conflicts with existing schedule '%s' on day %d", existing.Name, dayDTO.DayOfWeek)
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// hasTimeConflict проверяет пересекается ли время
+func (s *appointmentService) hasTimeConflict(start1, end1, start2, end2 time.Time) bool {
+	return start1.Before(end2) && end1.After(start2)
+}
+
+// deactivateOtherSchedules деактивирует все другие расписания врача (кроме указанного ID, если передан)
+func (s *appointmentService) deactivateOtherSchedules(doctorID uuid.UUID, excludeIDs ...uuid.UUID) error {
+	schedules, err := s.repo.GetDoctorSchedules(doctorID)
+	if err != nil {
+		return err
+	}
+
+	// Создаем мапу исключений для быстрого поиска
+	excludeMap := make(map[uuid.UUID]bool)
+	for _, id := range excludeIDs {
+		excludeMap[id] = true
+	}
+
+	for _, schedule := range schedules {
+		// Пропускаем расписания из списка исключений
+		if excludeMap[schedule.ID] {
+			continue
+		}
+
+		if schedule.IsActive {
+			schedule.IsActive = false
+			if err := s.repo.UpdateSchedule(schedule); err != nil {
+				return fmt.Errorf("failed to deactivate schedule %s: %w", schedule.Name, err)
+			}
+			s.logInfo("Deactivated existing schedule", map[string]interface{}{
+				"doctorID":   doctorID.String(),
+				"scheduleID": schedule.ID.String(),
+				"name":       schedule.Name,
+			})
+		}
+	}
+
+	return nil
+}
+
+func (s *appointmentService) GetDoctorSchedules(doctorID uuid.UUID) ([]*models.ScheduleResponse, error) {
+	s.logInfo("Getting schedules for doctor", map[string]interface{}{
+		"doctorID": doctorID.String(),
+	})
+
+	schedules, err := s.repo.GetDoctorSchedules(doctorID)
+	if err != nil {
+		s.logError("Failed to get schedules from repository", map[string]interface{}{
+			"doctorID": doctorID.String(),
+			"error":    err.Error(),
+		})
+		return nil, fmt.Errorf("failed to get schedules: %w", err)
+	}
+
+	var responses []*models.ScheduleResponse
+	for _, schedule := range schedules {
+		responses = append(responses, s.scheduleToResponse(schedule))
+	}
+
+	s.logInfo("Successfully retrieved schedules", map[string]interface{}{
+		"doctorID":      doctorID.String(),
+		"scheduleCount": len(responses),
+	})
+
+	return responses, nil
+}
+
+func (s *appointmentService) GenerateSlots(doctorID, scheduleID uuid.UUID, req *models.GenerateSlotsRequest) (*models.GenerateSlotsResponse, error) {
+	s.logInfo("Starting slot generation", map[string]interface{}{
+		"doctorID":   doctorID.String(),
+		"scheduleID": scheduleID.String(),
+		"startDate":  req.StartDate,
+		"endDate":    req.EndDate,
+	})
+
+	schedule, err := s.repo.GetScheduleByID(scheduleID)
+	if err != nil {
+		s.logError("Schedule not found", map[string]interface{}{
+			"doctorID":   doctorID.String(),
+			"scheduleID": scheduleID.String(),
+			"error":      err.Error(),
+		})
+		return nil, fmt.Errorf("schedule not found: %w", err)
+	}
+
+	if schedule.DoctorID != doctorID {
+		s.logError("Schedule ownership validation failed", map[string]interface{}{
+			"doctorID":         doctorID.String(),
+			"scheduleID":       scheduleID.String(),
+			"scheduleDoctorID": schedule.DoctorID.String(),
+		})
+		return nil, errors.New("schedule doesn't belong to this doctor")
+	}
+
+	if !schedule.IsActive {
+		s.logError("Cannot generate slots for inactive schedule", map[string]interface{}{
+			"doctorID":   doctorID.String(),
+			"scheduleID": scheduleID.String(),
+		})
+		return nil, errors.New("cannot generate slots for inactive schedule")
+	}
+
+	startDate, err := time.Parse("2006-01-02", req.StartDate)
+	if err != nil {
+		s.logError("Invalid start date format", map[string]interface{}{
+			"doctorID":  doctorID.String(),
+			"startDate": req.StartDate,
+			"error":     err.Error(),
+		})
+		return nil, fmt.Errorf("invalid start date: %w", err)
+	}
+
+	endDate, err := time.Parse("2006-01-02", req.EndDate)
+	if err != nil {
+		s.logError("Invalid end date format", map[string]interface{}{
+			"doctorID": doctorID.String(),
+			"endDate":  req.EndDate,
+			"error":    err.Error(),
+		})
+		return nil, fmt.Errorf("invalid end date: %w", err)
+	}
+
+	// Получаем исключения для периода
+	exceptions, _ := s.repo.GetDoctorExceptions(doctorID, startDate, endDate)
+	exceptionMap := make(map[string]*models.ScheduleException)
+	for _, ex := range exceptions {
+		dateStr := ex.Date.Format("2006-01-02")
+		exceptionMap[dateStr] = ex
+	}
+
+	s.logInfo("Retrieved exceptions for period", map[string]interface{}{
+		"doctorID":       doctorID.String(),
+		"exceptionCount": len(exceptions),
+	})
+
+	// Шаг 1: Собираем ВСЕ потенциальные слоты, которые нужно создать
+	var allSlotsToCreate []slotToCreate
+
+	for date := startDate; !date.After(endDate); date = date.AddDate(0, 0, 1) {
+		dateStr := date.Format("2006-01-02")
+		weekday := int(date.Weekday())
+		if weekday == 0 {
+			weekday = 7 // Воскресенье = 7
+		}
+
+		// Проверяем исключения
+		if exception, exists := exceptionMap[dateStr]; exists {
+			if exception.Type == "day_off" {
+				s.logInfo("Skipping day off", map[string]interface{}{
+					"doctorID": doctorID.String(),
+					"date":     dateStr,
+					"reason":   exception.Reason,
+				})
+				continue // Пропускаем выходной
+			}
+			// Для кастомных часов используем их вместо обычного расписания
+			if exception.Type == "custom_hours" && exception.CustomStartTime != nil && exception.CustomEndTime != nil {
+				daySlots := s.generateSlotsForDayCheck(date, *exception.CustomStartTime, *exception.CustomEndTime, nil, nil, schedule)
+				allSlotsToCreate = append(allSlotsToCreate, daySlots...)
+				continue
+			}
+		}
+
+		// Проверяем рабочие дни
+		isWorkDay := false
+		for _, workDay := range schedule.WorkDays {
+			if workDay == weekday {
+				isWorkDay = true
+				break
+			}
+		}
+
+		if !isWorkDay {
+			continue
+		}
+
+		// Собираем слоты для обычного дня
+		daySlots := s.generateSlotsForDayCheck(date, schedule.StartTime, schedule.EndTime, schedule.BreakStart, schedule.BreakEnd, schedule)
+		allSlotsToCreate = append(allSlotsToCreate, daySlots...)
+	}
+
+	// Шаг 2: Проверяем ВСЕ слоты на конфликты
+	s.logInfo("Checking all slots for conflicts", map[string]interface{}{
+		"doctorID":   doctorID.String(),
+		"totalSlots": len(allSlotsToCreate),
+	})
+
+	for _, slot := range allSlotsToCreate {
+		if s.slotExists(schedule.DoctorID, slot.startTime, slot.endTime) {
+			s.logError("Slot conflict detected - aborting generation", map[string]interface{}{
+				"doctorID":      doctorID.String(),
+				"conflictStart": slot.startTime.Format("2006-01-02 15:04:05"),
+				"conflictEnd":   slot.endTime.Format("2006-01-02 15:04:05"),
+			})
+			return nil, fmt.Errorf("cannot generate slots: slot from %s to %s already exists. Please choose a different time period or delete existing slots first",
+				slot.startTime.Format("2006-01-02 15:04"), slot.endTime.Format("15:04"))
+		}
+	}
+
+	// Шаг 3: Если все проверки прошли - создаем ВСЕ слоты
+	s.logInfo("No conflicts found - creating all slots", map[string]interface{}{
+		"doctorID":          doctorID.String(),
+		"totalSlots":        len(allSlotsToCreate),
+		"appointmentFormat": schedule.AppointmentFormat,
+	})
+
+	totalSlotsCreated := 0
+	for _, slot := range allSlotsToCreate {
+		// Определяем тип записи исходя из формата расписания
+		// Слоты должны наследовать точно такой же формат как у расписания
+		appointmentType := schedule.AppointmentFormat
+
+		appointment := &models.Appointment{
+			StartTime:       slot.startTime,
+			EndTime:         slot.endTime,
+			DoctorID:        schedule.DoctorID,
+			Title:           schedule.SlotTitle,
+			Status:          "available",
+			AppointmentType: appointmentType,
+			ScheduleID:      &schedule.ID,
+		}
+
+		if err := s.repo.CreateAppointment(appointment); err != nil {
+			s.logError("Failed to create appointment slot", map[string]interface{}{
+				"doctorID":  schedule.DoctorID.String(),
+				"startTime": slot.startTime.Format("2006-01-02 15:04:05"),
+				"endTime":   slot.endTime.Format("2006-01-02 15:04:05"),
+				"error":     err.Error(),
+			})
+			return nil, fmt.Errorf("failed to create slot: %w", err)
+		} else {
+			totalSlotsCreated++
+		}
+	}
+
+	s.logInfo("Slot generation completed successfully", map[string]interface{}{
+		"doctorID":          doctorID.String(),
+		"scheduleID":        scheduleID.String(),
+		"totalSlotsCreated": totalSlotsCreated,
+	})
+
+	message := fmt.Sprintf("Генерация завершена успешно: создано %d слотов", totalSlotsCreated)
+
+	return &models.GenerateSlotsResponse{
+		SlotsCreated: totalSlotsCreated,
+		Message:      message,
+	}, nil
+}
+
+// Структура для хранения информации о слоте, который нужно создать
+type slotToCreate struct {
+	startTime time.Time
+	endTime   time.Time
+}
+
+// generateSlotsForDayCheck - собирает слоты для дня без создания
+func (s *appointmentService) generateSlotsForDayCheck(date time.Time, startTime, endTime string, breakStart, breakEnd *string, schedule *models.DoctorSchedule) []slotToCreate {
+	location := time.Local
+	var slots []slotToCreate
+
+	// Парсим время начала и конца
+	start, err := time.ParseInLocation("2006-01-02 15:04", date.Format("2006-01-02")+" "+startTime, location)
+	if err != nil {
+		s.logError("Failed to parse start time", map[string]interface{}{
+			"doctorID":  schedule.DoctorID.String(),
+			"date":      date.Format("2006-01-02"),
+			"startTime": startTime,
+			"error":     err.Error(),
+		})
+		return slots
+	}
+
+	end, err := time.ParseInLocation("2006-01-02 15:04", date.Format("2006-01-02")+" "+endTime, location)
+	if err != nil {
+		s.logError("Failed to parse end time", map[string]interface{}{
+			"doctorID": schedule.DoctorID.String(),
+			"date":     date.Format("2006-01-02"),
+			"endTime":  endTime,
+			"error":    err.Error(),
+		})
+		return slots
+	}
+
+	// Парсим перерыв, если есть
+	var breakStartTime, breakEndTime *time.Time
+	if breakStart != nil && breakEnd != nil {
+		bStart, err := time.ParseInLocation("2006-01-02 15:04", date.Format("2006-01-02")+" "+*breakStart, location)
+		if err == nil {
+			breakStartTime = &bStart
+		}
+
+		bEnd, err := time.ParseInLocation("2006-01-02 15:04", date.Format("2006-01-02")+" "+*breakEnd, location)
+		if err == nil {
+			breakEndTime = &bEnd
+		}
+	}
+
+	// Генерируем слоты
+	slotDuration := time.Duration(schedule.SlotDuration) * time.Minute
+	current := start
+
+	for current.Add(slotDuration).Before(end) || current.Add(slotDuration).Equal(end) {
+		slotEnd := current.Add(slotDuration)
+
+		// Проверяем пересечение с перерывом
+		if breakStartTime != nil && breakEndTime != nil {
+			if current.Before(*breakEndTime) && slotEnd.After(*breakStartTime) {
+				// Слот пересекается с перерывом, пропускаем
+				current = *breakEndTime
+				continue
+			}
+		}
+
+		slots = append(slots, slotToCreate{
+			startTime: current,
+			endTime:   slotEnd,
+		})
+
+		current = slotEnd
+	}
+
+	return slots
+}
+
+// slotExists простая проверка существования слота
+func (s *appointmentService) slotExists(doctorID uuid.UUID, startTime, endTime time.Time) bool {
+	exists, err := s.repo.CheckSlotExists(doctorID, startTime, endTime)
+	if err != nil {
+		s.logError("Error checking slot existence", map[string]interface{}{
+			"doctorID":  doctorID.String(),
+			"startTime": startTime.Format("2006-01-02 15:04:05"),
+			"endTime":   endTime.Format("2006-01-02 15:04:05"),
+			"error":     err.Error(),
+		})
+		return true // В случае ошибки считаем что слот существует (безопасно)
+	}
+	return exists
+}
+
+// === APPOINTMENTS ===
+
+func (s *appointmentService) GetAvailableSlots(doctorID uuid.UUID, date string) ([]*models.AvailableSlot, error) {
+	s.logInfo("Getting available slots for doctor", map[string]interface{}{
+		"doctorID": doctorID.String(),
+		"date":     date,
+	})
+
+	// Парсим дату
+	parsedDate, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		s.logError("Invalid date format", map[string]interface{}{
+			"doctorID": doctorID.String(),
+			"date":     date,
+			"error":    err.Error(),
+		})
+		return nil, fmt.Errorf("invalid date format: %w", err)
+	}
+
+	// Получаем слоты на указанную дату
+	startOfDay := parsedDate
+	endOfDay := parsedDate.Add(24 * time.Hour)
+
+	appointments, err := s.repo.GetAvailableSlots(doctorID, startOfDay, endOfDay)
+	if err != nil {
+		s.logError("Failed to get available slots", map[string]interface{}{
+			"doctorID": doctorID.String(),
+			"date":     date,
+			"error":    err.Error(),
+		})
+		return nil, fmt.Errorf("failed to get available slots: %w", err)
+	}
+
+	var slots []*models.AvailableSlot
+	for _, appointment := range appointments {
+		slots = append(slots, &models.AvailableSlot{
+			ID:              appointment.ID,
+			StartTime:       appointment.StartTime,
+			EndTime:         appointment.EndTime,
+			Title:           appointment.Title,
+			AppointmentType: appointment.AppointmentType,
+			ScheduleID:      appointment.ScheduleID,
+		})
+	}
+
+	s.logInfo("Successfully retrieved available slots", map[string]interface{}{
+		"doctorID":  doctorID.String(),
+		"date":      date,
+		"slotCount": len(slots),
+	})
+
+	return slots, nil
+}
+
+func (s *appointmentService) BookAppointment(patientID, appointmentID uuid.UUID, req *models.BookAppointmentRequest) (*models.AppointmentResponse, error) {
+	s.logInfo("Booking appointment", map[string]interface{}{
+		"patientID":     patientID.String(),
+		"appointmentID": appointmentID.String(),
+	})
+
+	// Получаем запись
+	appointment, err := s.repo.GetAppointmentByID(appointmentID)
+	if err != nil {
+		s.logError("Appointment not found", map[string]interface{}{
+			"patientID":     patientID.String(),
+			"appointmentID": appointmentID.String(),
+			"error":         err.Error(),
+		})
+		return nil, fmt.Errorf("appointment not found: %w", err)
+	}
+
+	// Проверяем что слот доступен
+	if appointment.Status != "available" {
+		s.logError("Appointment is not available", map[string]interface{}{
+			"patientID":     patientID.String(),
+			"appointmentID": appointmentID.String(),
+			"status":        appointment.Status,
+		})
+		return nil, errors.New("appointment is not available")
+	}
+
+	// Проверяем что пациент не забронировал уже эту запись
+	if appointment.PatientID != nil && *appointment.PatientID == patientID {
+		s.logError("Patient already booked this appointment", map[string]interface{}{
+			"patientID":     patientID.String(),
+			"appointmentID": appointmentID.String(),
+		})
+		return nil, errors.New("you have already booked this appointment")
+	}
+
+	// Обновляем запись
+	appointment.PatientID = &patientID
+	appointment.Status = "booked"
+	if req.PatientNotes != "" {
+		appointment.PatientNotes = &req.PatientNotes
+	}
+
+	if err := s.repo.UpdateAppointment(appointment); err != nil {
+		s.logError("Failed to update appointment", map[string]interface{}{
+			"patientID":     patientID.String(),
+			"appointmentID": appointmentID.String(),
+			"error":         err.Error(),
+		})
+		return nil, fmt.Errorf("failed to book appointment: %w", err)
+	}
+
+	s.logInfo("Appointment booked successfully", map[string]interface{}{
+		"patientID":     patientID.String(),
+		"appointmentID": appointmentID.String(),
+		"doctorID":      appointment.DoctorID.String(),
+	})
+
+	return s.appointmentToResponse(appointment), nil
+}
+
+func (s *appointmentService) CancelAppointment(patientID, appointmentID uuid.UUID) error {
+	appointment, err := s.repo.GetAppointmentByID(appointmentID)
+	if err != nil {
+		return fmt.Errorf("appointment not found: %w", err)
+	}
+
+	// Проверяем что запись принадлежит этому пациенту
+	if appointment.PatientID == nil || *appointment.PatientID != patientID {
+		return errors.New("appointment doesn't belong to this patient or is not booked")
+	}
+
+	// Проверяем что запись можно отменить (не уже отменена и не завершена)
+	if appointment.Status != "booked" {
+		return fmt.Errorf("cannot cancel appointment with status '%s'", appointment.Status)
+	}
+
+	appointment.Cancel()
+
+	if err := s.repo.UpdateAppointment(appointment); err != nil {
+		return fmt.Errorf("failed to cancel appointment: %w", err)
+	}
+
+	// Отправляем событие об отмене записи
+	if s.messageService != nil {
+		// Получаем данные пациента
+		patientData, err := s.getUserData(patientID)
+		if err != nil {
+			s.logError("Failed to get patient data", map[string]interface{}{
+				"patientID": patientID.String(),
+				"error":     err.Error(),
+			})
+			// Используем базовую информацию из записи
+			patientData = &UserData{
+				Email: "patient@clintech.kz",
+				Phone: "77071234567",
+			}
+		}
+
+		// Получаем данные врача
+		doctorData, err := s.getDoctorData(appointment.DoctorID)
+		if err != nil {
+			s.logError("Failed to get doctor data", map[string]interface{}{
+				"doctorID": appointment.DoctorID.String(),
+				"error":    err.Error(),
+			})
+			// Используем базовую информацию
+			doctorData = &DoctorData{
+				Email: "doctor@clintech.kz",
+				Phone: "77071234568",
+			}
+		}
+
+		// Формируем имя врача
+		doctorName := ""
+		if doctorData.FirstName != "" {
+			doctorName = doctorData.FirstName
+		}
+		if doctorData.MiddleName != "" {
+			doctorName += " " + doctorData.MiddleName
+		}
+		if doctorData.LastName != "" {
+			doctorName += " " + doctorData.LastName
+		}
+		if doctorName == "" {
+			doctorName = "Врач"
+		}
+
+		// Формируем имя пациента (пока используем Email как имя)
+		patientName := patientData.Email
+		if patientName == "" {
+			patientName = "Пациент"
+		}
+
+		event := &models.AppointmentCanceledEvent{
+			Type:            "appointment_canceled",
+			AppointmentID:   appointment.ID,
+			PatientID:       patientID,
+			DoctorID:        appointment.DoctorID,
+			PatientEmail:    patientData.Email,
+			DoctorEmail:     doctorData.Email,
+			PatientPhone:    patientData.Phone,
+			DoctorPhone:     doctorData.Phone,
+			PatientName:     patientName,
+			DoctorName:      doctorName,
+			StartTime:       appointment.StartTime,
+			EndTime:         appointment.EndTime,
+			AppointmentType: appointment.AppointmentType,
+			CancelReason:    "Отменено пациентом",
+		}
+
+		if err := s.messageService.PublishAppointmentCanceled(context.Background(), event); err != nil {
+			s.logError("Failed to publish appointment canceled event", map[string]interface{}{
+				"appointmentID": appointmentID.String(),
+				"error":         err.Error(),
+			})
+			// Не возвращаем ошибку, так как основная операция прошла успешно
+		} else {
+			s.logInfo("Appointment canceled event published successfully", map[string]interface{}{
+				"appointmentID": appointmentID.String(),
+				"patientID":     patientID.String(),
+				"doctorID":      appointment.DoctorID.String(),
+			})
+		}
+	}
+
+	return nil
+}
+
+func (s *appointmentService) UpdateAppointment(doctorID, appointmentID uuid.UUID, req *models.UpdateAppointmentRequest) (*models.AppointmentResponse, error) {
+	appointment, err := s.repo.GetAppointmentByID(appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("appointment not found: %w", err)
+	}
+
+	if appointment.DoctorID != doctorID {
+		return nil, errors.New("appointment doesn't belong to this doctor")
+	}
+
+	// Обновляем только переданные поля
+	if req.DoctorNotes != "" {
+		appointment.DoctorNotes = req.DoctorNotes
+	}
+	if req.HealthPassportID != nil {
+		appointment.HealthPassportID = req.HealthPassportID
+	}
+
+	appointment.UpdatedAt = time.Now()
+
+	if err := s.repo.UpdateAppointment(appointment); err != nil {
+		return nil, fmt.Errorf("failed to update appointment: %w", err)
+	}
+
+	return s.appointmentToResponse(appointment), nil
+}
+
+func (s *appointmentService) GetDoctorAppointments(doctorID uuid.UUID) ([]*models.AppointmentResponse, error) {
+	appointments, err := s.repo.GetDoctorAppointments(doctorID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get doctor appointments: %w", err)
+	}
+
+	responses := make([]*models.AppointmentResponse, len(appointments))
+	for i, appointment := range appointments {
+		responses[i] = s.appointmentToResponse(appointment)
+	}
+
+	return responses, nil
+}
+
+func (s *appointmentService) GetPatientAppointments(patientID uuid.UUID) ([]*models.AppointmentResponse, error) {
+	appointments, err := s.repo.GetPatientAppointments(patientID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get patient appointments: %w", err)
+	}
+
+	responses := make([]*models.AppointmentResponse, len(appointments))
+	for i, appointment := range appointments {
+		responses[i] = s.appointmentToResponse(appointment)
+	}
+
+	return responses, nil
+}
+
+// === EXCEPTIONS ===
+
+func (s *appointmentService) AddException(doctorID uuid.UUID, req *models.AddExceptionRequest) (*models.ExceptionResponse, error) {
+	date, err := time.Parse("2006-01-02", req.Date)
+	if err != nil {
+		return nil, fmt.Errorf("invalid date format: %w", err)
+	}
+
+	exception := &models.ScheduleException{
+		DoctorID:        doctorID,
+		Date:            date,
+		Type:            req.Type,
+		CustomStartTime: req.CustomStartTime,
+		CustomEndTime:   req.CustomEndTime,
+		Reason:          req.Reason,
+	}
+
+	if err := s.repo.CreateException(exception); err != nil {
+		return nil, fmt.Errorf("failed to create exception: %w", err)
+	}
+
+	return s.exceptionToResponse(exception), nil
+}
+
+func (s *appointmentService) GetDoctorExceptions(doctorID uuid.UUID, startDate, endDate string) ([]*models.ExceptionResponse, error) {
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid start date: %w", err)
+	}
+
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		return nil, fmt.Errorf("invalid end date: %w", err)
+	}
+
+	exceptions, err := s.repo.GetDoctorExceptions(doctorID, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get exceptions: %w", err)
+	}
+
+	responses := make([]*models.ExceptionResponse, len(exceptions))
+	for i, exception := range exceptions {
+		responses[i] = s.exceptionToResponse(exception)
+	}
+
+	return responses, nil
+}
+
+// === HELPER METHODS ===
+
+func (s *appointmentService) scheduleToResponse(schedule *models.DoctorSchedule) *models.ScheduleResponse {
+	return &models.ScheduleResponse{
+		ID:                schedule.ID,
+		DoctorID:          schedule.DoctorID,
+		Name:              schedule.Name,
+		WorkDays:          []int(schedule.WorkDays),
+		StartTime:         schedule.StartTime,
+		EndTime:           schedule.EndTime,
+		BreakStart:        schedule.BreakStart,
+		BreakEnd:          schedule.BreakEnd,
+		SlotDuration:      schedule.SlotDuration,
+		SlotTitle:         schedule.SlotTitle,
+		AppointmentFormat: schedule.AppointmentFormat,
+		IsActive:          schedule.IsActive,
+		CreatedAt:         schedule.CreatedAt,
+		UpdatedAt:         schedule.UpdatedAt,
+	}
+}
+
+func (s *appointmentService) appointmentToResponse(appointment *models.Appointment) *models.AppointmentResponse {
+	return &models.AppointmentResponse{
+		ID:               appointment.ID,
+		StartTime:        appointment.StartTime,
+		EndTime:          appointment.EndTime,
+		DoctorID:         appointment.DoctorID,
+		PatientID:        appointment.PatientID,
+		Title:            appointment.Title,
+		Status:           appointment.Status,
+		AppointmentType:  appointment.AppointmentType,
+		MeetingLink:      appointment.MeetingLink,
+		MeetingID:        appointment.MeetingID,
+		PatientNotes:     appointment.PatientNotes,
+		DoctorNotes:      appointment.DoctorNotes,
+		AnketaID:         appointment.AnketaID,
+		HealthPassportID: appointment.HealthPassportID,
+		CreatedAt:        appointment.CreatedAt,
+		UpdatedAt:        appointment.UpdatedAt,
+	}
+}
+
+func (s *appointmentService) exceptionToResponse(exception *models.ScheduleException) *models.ExceptionResponse {
+	return &models.ExceptionResponse{
+		ID:              exception.ID,
+		DoctorID:        exception.DoctorID,
+		Date:            exception.Date,
+		Type:            exception.Type,
+		CustomStartTime: exception.CustomStartTime,
+		CustomEndTime:   exception.CustomEndTime,
+		Reason:          exception.Reason,
+		CreatedAt:       exception.CreatedAt,
+	}
+}
+
+func (s *appointmentService) UpdateSchedule(doctorID, scheduleID uuid.UUID, req *models.UpdateScheduleRequest) (*models.ScheduleResponse, error) {
+	schedule, err := s.repo.GetScheduleByID(scheduleID)
+	if err != nil {
+		return nil, fmt.Errorf("schedule not found: %w", err)
+	}
+
+	if schedule.DoctorID != doctorID {
+		return nil, errors.New("schedule doesn't belong to this doctor")
+	}
+
+	// Сохраняем оригинальные значения для проверки конфликтов
+	originalSchedule := *schedule
+
+	// Обновляем только переданные поля
+	if req.Name != nil {
+		schedule.Name = *req.Name
+	}
+	if req.WorkDays != nil {
+		schedule.WorkDays = *req.WorkDays
+	}
+	if req.StartTime != nil {
+		schedule.StartTime = *req.StartTime
+	}
+	if req.EndTime != nil {
+		schedule.EndTime = *req.EndTime
+	}
+	if req.BreakStart != nil {
+		schedule.BreakStart = req.BreakStart
+	}
+	if req.BreakEnd != nil {
+		schedule.BreakEnd = req.BreakEnd
+	}
+	if req.SlotDuration != nil {
+		schedule.SlotDuration = *req.SlotDuration
+	}
+	if req.SlotTitle != nil {
+		schedule.SlotTitle = *req.SlotTitle
+	}
+	if req.AppointmentFormat != nil {
+		schedule.AppointmentFormat = *req.AppointmentFormat
+	}
+
+	// Проверяем изменение типа записи для обновления слотов
+	appointmentFormatChanged := req.AppointmentFormat != nil && originalSchedule.AppointmentFormat != schedule.AppointmentFormat
+
+	// Проверяем конфликты если расписание активно и изменились критичные поля
+	if schedule.IsActive {
+		timeChanged := originalSchedule.StartTime != schedule.StartTime || originalSchedule.EndTime != schedule.EndTime
+		daysChanged := !s.workDaysEqual([]int(originalSchedule.WorkDays), []int(schedule.WorkDays))
+
+		if timeChanged || daysChanged {
+			s.logInfo("Checking conflicts after schedule update", map[string]interface{}{
+				"doctorID":    doctorID.String(),
+				"scheduleID":  scheduleID.String(),
+				"timeChanged": timeChanged,
+				"daysChanged": daysChanged,
+			})
+
+			if err := s.checkScheduleConflictsForExisting(doctorID, schedule); err != nil {
+				s.logError("Cannot update schedule due to conflicts", map[string]interface{}{
+					"doctorID":   doctorID.String(),
+					"scheduleID": scheduleID.String(),
+					"error":      err.Error(),
+				})
+				return nil, err
+			}
+		}
+	}
+
+	if err := s.repo.UpdateSchedule(schedule); err != nil {
+		return nil, fmt.Errorf("failed to update schedule: %w", err)
+	}
+
+	// Если изменился формат записи - обновляем все доступные слоты
+	if appointmentFormatChanged {
+		s.logInfo("Appointment format changed - updating available slots", map[string]interface{}{
+			"doctorID":             doctorID.String(),
+			"scheduleID":           scheduleID.String(),
+			"oldAppointmentFormat": originalSchedule.AppointmentFormat,
+			"newAppointmentFormat": schedule.AppointmentFormat,
+		})
+
+		if err := s.repo.UpdateScheduleAppointmentType(scheduleID, schedule.AppointmentFormat); err != nil {
+			s.logError("Failed to update appointment type in slots", map[string]interface{}{
+				"doctorID":             doctorID.String(),
+				"scheduleID":           scheduleID.String(),
+				"newAppointmentFormat": schedule.AppointmentFormat,
+				"error":                err.Error(),
+			})
+			// Возвращаем ошибку, но расписание уже сохранено - это важно отметить
+			return nil, fmt.Errorf("schedule updated but failed to update slots appointment type: %w", err)
+		}
+
+		s.logInfo("Available slots appointment type updated successfully", map[string]interface{}{
+			"doctorID":             doctorID.String(),
+			"scheduleID":           scheduleID.String(),
+			"newAppointmentFormat": schedule.AppointmentFormat,
+		})
+	}
+
+	return s.scheduleToResponse(schedule), nil
+}
+
+// workDaysEqual сравнивает два массива рабочих дней
+func (s *appointmentService) workDaysEqual(days1, days2 []int) bool {
+	if len(days1) != len(days2) {
+		return false
+	}
+
+	// Создаем мапы для сравнения
+	map1 := make(map[int]bool)
+	map2 := make(map[int]bool)
+
+	for _, day := range days1 {
+		map1[day] = true
+	}
+	for _, day := range days2 {
+		map2[day] = true
+	}
+
+	for day := range map1 {
+		if !map2[day] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (s *appointmentService) DeleteSchedule(doctorID, scheduleID uuid.UUID) error {
+	schedule, err := s.repo.GetScheduleByID(scheduleID)
+	if err != nil {
+		return fmt.Errorf("schedule not found: %w", err)
+	}
+
+	if schedule.DoctorID != doctorID {
+		return errors.New("schedule doesn't belong to this doctor")
+	}
+
+	s.logInfo("Starting schedule deletion", map[string]interface{}{
+		"doctorID":   doctorID.String(),
+		"scheduleID": scheduleID.String(),
+		"name":       schedule.Name,
+	})
+
+	if err := s.repo.DeleteSchedule(scheduleID); err != nil {
+		s.logError("Failed to delete schedule", map[string]interface{}{
+			"doctorID":   doctorID.String(),
+			"scheduleID": scheduleID.String(),
+			"error":      err.Error(),
+		})
+		return fmt.Errorf("failed to delete schedule: %w", err)
+	}
+
+	s.logInfo("Schedule and available slots deleted successfully", map[string]interface{}{
+		"doctorID":   doctorID.String(),
+		"scheduleID": scheduleID.String(),
+		"note":       "Booked appointments are preserved for history",
+	})
+
+	return nil
+}
+
+func (s *appointmentService) ToggleSchedule(doctorID, scheduleID uuid.UUID, req *models.ToggleScheduleRequest, hasRequestBody bool) (*models.ScheduleResponse, error) {
+	schedule, err := s.repo.GetScheduleByID(scheduleID)
+	if err != nil {
+		return nil, fmt.Errorf("schedule not found: %w", err)
+	}
+
+	if schedule.DoctorID != doctorID {
+		return nil, errors.New("schedule doesn't belong to this doctor")
+	}
+
+	// Определяем желаемое состояние
+	var targetIsActive bool
+	var actionType string
+
+	if hasRequestBody {
+		// Если есть тело запроса - используем переданное значение
+		targetIsActive = req.IsActive
+		if req.IsActive && !schedule.IsActive {
+			actionType = "ACTIVATING_BY_REQUEST"
+		} else if !req.IsActive && schedule.IsActive {
+			actionType = "DEACTIVATING_BY_REQUEST"
+		} else if req.IsActive && schedule.IsActive {
+			actionType = "ALREADY_ACTIVE_BY_REQUEST"
+		} else {
+			actionType = "ALREADY_INACTIVE_BY_REQUEST"
+		}
+	} else {
+		// Если нет тела запроса - переключаем на противоположное
+		targetIsActive = !schedule.IsActive
+		if targetIsActive {
+			actionType = "AUTO_ACTIVATING"
+		} else {
+			actionType = "AUTO_DEACTIVATING"
+		}
+	}
+
+	// Детальное логирование для отладки
+	s.logInfo("ToggleSchedule request received", map[string]interface{}{
+		"doctorID":          doctorID.String(),
+		"scheduleID":        scheduleID.String(),
+		"scheduleName":      schedule.Name,
+		"currentIsActive":   schedule.IsActive,
+		"hasRequestBody":    hasRequestBody,
+		"requestedIsActive": req.IsActive,
+		"targetIsActive":    targetIsActive,
+		"actionType":        actionType,
+	})
+
+	// Если активируем расписание - деактивируем все остальные
+	if targetIsActive && !schedule.IsActive {
+		s.logInfo("Activating schedule - deactivating all other schedules", map[string]interface{}{
+			"doctorID":   doctorID.String(),
+			"scheduleID": scheduleID.String(),
+			"name":       schedule.Name,
+		})
+
+		// Деактивируем все другие активные расписания
+		if err := s.deactivateOtherSchedules(doctorID, scheduleID); err != nil {
+			s.logError("Failed to deactivate other schedules", map[string]interface{}{
+				"doctorID":   doctorID.String(),
+				"scheduleID": scheduleID.String(),
+				"error":      err.Error(),
+			})
+			return nil, fmt.Errorf("failed to deactivate other schedules: %w", err)
+		}
+	}
+
+	schedule.IsActive = targetIsActive
+
+	if err := s.repo.UpdateSchedule(schedule); err != nil {
+		return nil, fmt.Errorf("failed to toggle schedule: %w", err)
+	}
+
+	s.logInfo("Schedule toggled successfully", map[string]interface{}{
+		"doctorID":      doctorID.String(),
+		"scheduleID":    scheduleID.String(),
+		"finalIsActive": schedule.IsActive,
+		"operation": func() string {
+			if schedule.IsActive {
+				return "ACTIVATED"
+			} else {
+				return "DEACTIVATED"
+			}
+		}(),
+	})
+
+	return s.scheduleToResponse(schedule), nil
+}
+
+// checkScheduleConflictsForExisting проверяет конфликты для существующего расписания
+func (s *appointmentService) checkScheduleConflictsForExisting(doctorID uuid.UUID, schedule *models.DoctorSchedule) error {
+	existingSchedules, err := s.repo.GetDoctorSchedules(doctorID)
+	if err != nil {
+		return fmt.Errorf("failed to get existing schedules: %w", err)
+	}
+
+	startTime, err := time.Parse("15:04", schedule.StartTime)
+	if err != nil {
+		return fmt.Errorf("invalid start time format: %w", err)
+	}
+
+	endTime, err := time.Parse("15:04", schedule.EndTime)
+	if err != nil {
+		return fmt.Errorf("invalid end time format: %w", err)
+	}
+
+	for _, existing := range existingSchedules {
+		// Пропускаем само расписание и неактивные расписания
+		if existing.ID == schedule.ID || !existing.IsActive {
+			continue
+		}
+
+		existingStart, _ := time.Parse("15:04", existing.StartTime)
+		existingEnd, _ := time.Parse("15:04", existing.EndTime)
+
+		// Проверяем пересечение рабочих дней
+		if s.hasWorkDayConflict([]int(schedule.WorkDays), []int(existing.WorkDays)) {
+			// Проверяем пересечение времени
+			if s.hasTimeConflict(startTime, endTime, existingStart, existingEnd) {
+				return fmt.Errorf("schedule conflicts with active schedule '%s' on overlapping work days and times", existing.Name)
+			}
+		}
+	}
+
+	return nil
+}
+
+// New method for forcing clean slots of schedule
+func (s *appointmentService) DeleteScheduleSlots(doctorID, scheduleID uuid.UUID) error {
+	schedule, err := s.repo.GetScheduleByID(scheduleID)
+	if err != nil {
+		return fmt.Errorf("schedule not found: %w", err)
+	}
+
+	if schedule.DoctorID != doctorID {
+		return errors.New("schedule doesn't belong to this doctor")
+	}
+
+	if err := s.repo.DeleteScheduleSlots(scheduleID); err != nil {
+		return fmt.Errorf("failed to delete schedule slots: %w", err)
+	}
+
+	return nil
+}
+
+func (s *appointmentService) GetGeneratedSlots(doctorID, scheduleID uuid.UUID, startDate, endDate string) (*models.GeneratedSlotsResponse, error) {
+	s.logInfo("Getting generated slots", map[string]interface{}{
+		"doctorID":   doctorID.String(),
+		"scheduleID": scheduleID.String(),
+		"startDate":  startDate,
+		"endDate":    endDate,
+	})
+
+	// Проверяем расписание и права доступа
+	schedule, err := s.repo.GetScheduleByID(scheduleID)
+	if err != nil {
+		s.logError("Schedule not found", map[string]interface{}{
+			"doctorID":   doctorID.String(),
+			"scheduleID": scheduleID.String(),
+			"error":      err.Error(),
+		})
+		return nil, fmt.Errorf("schedule not found: %w", err)
+	}
+
+	if schedule.DoctorID != doctorID {
+		s.logError("Schedule ownership validation failed", map[string]interface{}{
+			"doctorID":         doctorID.String(),
+			"scheduleID":       scheduleID.String(),
+			"scheduleDoctorID": schedule.DoctorID.String(),
+		})
+		return nil, errors.New("schedule doesn't belong to this doctor")
+	}
+
+	// Парсим даты
+	start, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		s.logError("Invalid start date format", map[string]interface{}{
+			"doctorID":  doctorID.String(),
+			"startDate": startDate,
+			"error":     err.Error(),
+		})
+		return nil, fmt.Errorf("invalid start date: %w", err)
+	}
+
+	end, err := time.Parse("2006-01-02", endDate)
+	if err != nil {
+		s.logError("Invalid end date format", map[string]interface{}{
+			"doctorID": doctorID.String(),
+			"endDate":  endDate,
+			"error":    err.Error(),
+		})
+		return nil, fmt.Errorf("invalid end date: %w", err)
+	}
+
+	// Добавляем время к концу дня для правильного поиска
+	endWithTime := end.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+
+	// Получаем все слоты для расписания в заданном периоде
+	appointments, err := s.repo.GetScheduleSlots(scheduleID, start, endWithTime)
+	if err != nil {
+		s.logError("Failed to get schedule slots from repository", map[string]interface{}{
+			"doctorID":   doctorID.String(),
+			"scheduleID": scheduleID.String(),
+			"error":      err.Error(),
+		})
+		return nil, fmt.Errorf("failed to get schedule slots: %w", err)
+	}
+
+	// Преобразуем слоты в детальную информацию
+	slots := make([]models.GeneratedSlotDetail, len(appointments))
+	var availableCount, bookedCount, canceledCount int
+
+	for i, appointment := range appointments {
+		duration := int(appointment.EndTime.Sub(appointment.StartTime).Minutes())
+
+		var bookedAt *time.Time
+		if appointment.Status == "booked" && !appointment.UpdatedAt.IsZero() {
+			bookedAt = &appointment.UpdatedAt
+		}
+
+		slots[i] = models.GeneratedSlotDetail{
+			ID:              appointment.ID,
+			StartTime:       appointment.StartTime,
+			EndTime:         appointment.EndTime,
+			Duration:        duration,
+			Status:          appointment.Status,
+			AppointmentType: appointment.AppointmentType,
+			Title:           appointment.Title,
+			PatientID:       appointment.PatientID,
+			PatientNotes:    appointment.PatientNotes,
+			BookedAt:        bookedAt,
+		}
+
+		// Подсчет статистики
+		switch appointment.Status {
+		case "available":
+			availableCount++
+		case "booked":
+			bookedCount++
+		case "canceled":
+			canceledCount++
+		}
+	}
+
+	// Подготавливаем метаданные расписания
+	scheduleMetadata := models.ScheduleMetadata{
+		ID:                schedule.ID,
+		Name:              schedule.Name,
+		WorkDays:          []int(schedule.WorkDays),
+		StartTime:         schedule.StartTime,
+		EndTime:           schedule.EndTime,
+		BreakStart:        schedule.BreakStart,
+		BreakEnd:          schedule.BreakEnd,
+		SlotDuration:      schedule.SlotDuration,
+		SlotTitle:         schedule.SlotTitle,
+		AppointmentFormat: schedule.AppointmentFormat,
+		IsActive:          schedule.IsActive,
+	}
+
+	// Подсчитываем количество дней
+	days := int(end.Sub(start).Hours()/24) + 1
+
+	// Подготавливаем период
+	period := models.Period{
+		StartDate: startDate,
+		EndDate:   endDate,
+		Days:      days,
+	}
+
+	// Подготавливаем сводку
+	summary := models.SlotsSummary{
+		TotalSlots:     len(slots),
+		AvailableSlots: availableCount,
+		BookedSlots:    bookedCount,
+		CanceledSlots:  canceledCount,
+	}
+
+	s.logInfo("Generated slots retrieved successfully", map[string]interface{}{
+		"doctorID":       doctorID.String(),
+		"scheduleID":     scheduleID.String(),
+		"totalSlots":     len(slots),
+		"availableSlots": availableCount,
+		"bookedSlots":    bookedCount,
+		"canceledSlots":  canceledCount,
+	})
+
+	return &models.GeneratedSlotsResponse{
+		Schedule: scheduleMetadata,
+		Period:   period,
+		Slots:    slots,
+		Summary:  summary,
+	}, nil
+}
+
+func (s *appointmentService) GetDoctorAppointmentByID(doctorID, appointmentID uuid.UUID) (*models.AppointmentResponse, error) {
+	appointment, err := s.repo.GetAppointmentByID(appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("appointment not found: %w", err)
+	}
+
+	if appointment.DoctorID != doctorID {
+		return nil, errors.New("appointment doesn't belong to this doctor")
+	}
+
+	return s.appointmentToResponse(appointment), nil
+}
+
+func (s *appointmentService) GetPatientAppointmentByID(patientID, appointmentID uuid.UUID) (*models.AppointmentResponse, error) {
+	appointment, err := s.repo.GetAppointmentByID(appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("appointment not found: %w", err)
+	}
+
+	if appointment.PatientID == nil || *appointment.PatientID != patientID {
+		return nil, errors.New("appointment doesn't belong to this patient")
+	}
+
+	return s.appointmentToResponse(appointment), nil
+}
+
+// === APPOINTMENT FILES SERVICE METHODS ===
+
+// UploadAppointmentFile загружает файл к записи
+func (s *appointmentService) UploadAppointmentFile(userID uuid.UUID, userRole string, appointmentID uuid.UUID, fileData []byte, fileName, mimeType, fileType, name string) (*models.AppointmentFileResponse, error) {
+	// 1. Проверяем права доступа к записи
+	hasAccess, err := s.CheckAppointmentAccess(userID, userRole, appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check appointment access: %w", err)
+	}
+	if !hasAccess {
+		return nil, errors.New("no access to this appointment")
+	}
+
+	// 2. Нормализация типа файла (убираем лишние пробелы)
+	if fileType != "" {
+		fileType = strings.TrimSpace(fileType)
+		if len(fileType) > 50 {
+			fileType = fileType[:50]
+		}
+	}
+
+	// 3. Загружаем файл в FileServer
+	fileID, err := s.uploadToFileServer(userID, fileData, fileName, mimeType, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to upload to file server: %w", err)
+	}
+
+	// 4. Создаем связь файла с записью
+	appointmentFile := &models.AppointmentFile{
+		AppointmentID: appointmentID,
+		FileID:        *fileID,
+		FileType:      fileType,
+		UploadedBy:    userRole,
+	}
+
+	err = s.repo.CreateAppointmentFile(appointmentFile)
+	if err != nil {
+		// Если не удалось создать связь, пытаемся удалить файл из FileServer
+		s.deleteFromFileServer(*fileID)
+		return nil, fmt.Errorf("failed to create appointment file: %w", err)
+	}
+
+	// 5. Возвращаем ответ с информацией о файле
+	return s.buildAppointmentFileResponse(appointmentFile, fileName, fileName, mimeType, int64(len(fileData)))
+}
+
+// GetAppointmentFiles получает список файлов записи
+func (s *appointmentService) GetAppointmentFiles(userID uuid.UUID, userRole string, appointmentID uuid.UUID) ([]*models.AppointmentFileResponse, error) {
+	// 1. Проверяем права доступа к записи
+	hasAccess, err := s.CheckAppointmentAccess(userID, userRole, appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check appointment access: %w", err)
+	}
+	if !hasAccess {
+		return nil, errors.New("no access to this appointment")
+	}
+
+	// 2. Получаем файлы записи
+	appointmentFiles, err := s.repo.GetAppointmentFiles(appointmentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get appointment files: %w", err)
+	}
+
+	// 3. Обогащаем информацией из FileServer
+	var responses []*models.AppointmentFileResponse
+	for _, appointmentFile := range appointmentFiles {
+		fileInfo, err := s.getFileInfoFromFileServer(appointmentFile.FileID)
+		if err != nil {
+			// Если файл не найден в FileServer, пропускаем его
+			continue
+		}
+
+		response, err := s.buildAppointmentFileResponse(appointmentFile, fileInfo.Name, fileInfo.OriginalName, fileInfo.MimeType, fileInfo.Size)
+		if err != nil {
+			continue
+		}
+		responses = append(responses, response)
+	}
+
+	return responses, nil
+}
+
+// DeleteAppointmentFile удаляет файл записи
+func (s *appointmentService) DeleteAppointmentFile(userID uuid.UUID, userRole string, appointmentID, fileID uuid.UUID) error {
+	// 1. Проверяем права доступа к записи
+	hasAccess, err := s.CheckAppointmentAccess(userID, userRole, appointmentID)
+	if err != nil {
+		return fmt.Errorf("failed to check appointment access: %w", err)
+	}
+	if !hasAccess {
+		return errors.New("no access to this appointment")
+	}
+
+	// 2. Получаем информацию о файле записи
+	appointmentFile, err := s.repo.GetAppointmentFileByID(fileID)
+	if err != nil {
+		return fmt.Errorf("appointment file not found: %w", err)
+	}
+
+	// 3. Проверяем, что файл принадлежит этой записи
+	if appointmentFile.AppointmentID != appointmentID {
+		return errors.New("file doesn't belong to this appointment")
+	}
+
+	// 4. Удаляем из FileServer
+	err = s.deleteFromFileServer(appointmentFile.FileID)
+	if err != nil {
+		// Логируем ошибку, но продолжаем удаление связи
+		s.logger.Error("Failed to delete file from FileServer", map[string]interface{}{
+			"file_id": appointmentFile.FileID,
+			"error":   err.Error(),
+		})
+	}
+
+	// 5. Удаляем связь
+	err = s.repo.DeleteAppointmentFile(fileID)
+	if err != nil {
+		return fmt.Errorf("failed to delete appointment file: %w", err)
+	}
+
+	return nil
+}
+
+// DownloadAppointmentFile скачивает файл записи
+func (s *appointmentService) DownloadAppointmentFile(userID uuid.UUID, userRole string, appointmentID, fileID uuid.UUID) ([]byte, string, string, error) {
+	// 1. Проверяем права доступа к записи
+	hasAccess, err := s.CheckAppointmentAccess(userID, userRole, appointmentID)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to check appointment access: %w", err)
+	}
+	if !hasAccess {
+		return nil, "", "", errors.New("no access to this appointment")
+	}
+
+	// 2. Получаем информацию о файле записи
+	appointmentFile, err := s.repo.GetAppointmentFileByID(fileID)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("appointment file not found: %w", err)
+	}
+
+	// 3. Проверяем, что файл принадлежит этой записи
+	if appointmentFile.AppointmentID != appointmentID {
+		return nil, "", "", errors.New("file doesn't belong to this appointment")
+	}
+
+	// 4. Скачиваем файл из FileServer
+	fileData, fileName, mimeType, err := s.downloadFromFileServer(appointmentFile.FileID)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("failed to download from file server: %w", err)
+	}
+
+	return fileData, fileName, mimeType, nil
+}
+
+// CheckAppointmentAccess проверяет права доступа к записи
+func (s *appointmentService) CheckAppointmentAccess(userID uuid.UUID, userRole string, appointmentID uuid.UUID) (bool, error) {
+	appointment, err := s.repo.GetAppointmentByID(appointmentID)
+	if err != nil {
+		return false, fmt.Errorf("appointment not found: %w", err)
+	}
+
+	switch userRole {
+	case "patient":
+		return appointment.PatientID != nil && *appointment.PatientID == userID, nil
+	case "doctor":
+		return appointment.DoctorID == userID, nil
+	default:
+		return false, errors.New("invalid user role")
+	}
+}
+
+// === HELPER METHODS FOR FILESERVER INTEGRATION ===
+
+// FileServerResponse represents FileServer API response
+type FileServerResponse struct {
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	OriginalName string    `json:"original_name"`
+	MimeType     string    `json:"mime_type"`
+	Size         int64     `json:"size"`
+}
+
+// uploadToFileServer uploads file to FileServer service
+func (s *appointmentService) uploadToFileServer(userID uuid.UUID, fileData []byte, fileName, mimeType, name string) (*uuid.UUID, error) {
+	// Создаем multipart form для отправки файла
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	// Добавляем файл
+	part, err := writer.CreateFormFile("file", fileName)
+	if err != nil {
+		return nil, err
+	}
+	_, err = part.Write(fileData)
+	if err != nil {
+		return nil, err
+	}
+
+	// Добавляем имя файла если указано
+	if name != "" {
+		err = writer.WriteField("name", name)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	err = writer.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	// Создаем HTTP запрос
+	req, err := http.NewRequest("POST", "http://fileserver_service:8087/files", &buf)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.generateInternalJWT(userID, "patient"))) // Temporary token
+
+	// Выполняем запрос
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("FileServer returned status %d", resp.StatusCode)
+	}
+
+	// Парсим ответ
+	var fileResponses []FileServerResponse
+	err = json.NewDecoder(resp.Body).Decode(&fileResponses)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(fileResponses) == 0 {
+		return nil, errors.New("no files uploaded")
+	}
+
+	return &fileResponses[0].ID, nil
+}
+
+// getFileInfoFromFileServer получает информацию о файле из FileServer
+func (s *appointmentService) getFileInfoFromFileServer(fileID uuid.UUID) (*FileServerResponse, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("http://fileserver_service:8087/files/%s", fileID), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.generateInternalJWT(uuid.New(), "system")))
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("FileServer returned status %d", resp.StatusCode)
+	}
+
+	var fileInfo FileServerResponse
+	err = json.NewDecoder(resp.Body).Decode(&fileInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	return &fileInfo, nil
+}
+
+// downloadFromFileServer скачивает файл из FileServer
+func (s *appointmentService) downloadFromFileServer(fileID uuid.UUID) ([]byte, string, string, error) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("http://fileserver_service:8087/files/%s/download", fileID), nil)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.generateInternalJWT(uuid.New(), "system")))
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", "", fmt.Errorf("FileServer returned status %d", resp.StatusCode)
+	}
+
+	// Читаем содержимое файла
+	fileData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	// Извлекаем имя файла и тип из заголовков
+	fileName := "download"
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		// Простая обработка Content-Disposition для получения имени файла
+		// В продакшене нужна более надежная обработка
+		fileName = cd
+	}
+
+	mimeType := resp.Header.Get("Content-Type")
+
+	return fileData, fileName, mimeType, nil
+}
+
+// deleteFromFileServer удаляет файл из FileServer
+func (s *appointmentService) deleteFromFileServer(fileID uuid.UUID) error {
+	req, err := http.NewRequest("DELETE", fmt.Sprintf("http://fileserver_service:8087/files/%s", fileID), nil)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.generateInternalJWT(uuid.New(), "system")))
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("FileServer returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// generateInternalJWT generates a JWT token for internal service communication
+func (s *appointmentService) generateInternalJWT(userID uuid.UUID, role string) string {
+	if s.jwtSecret == "" {
+		// Fallback для тестирования
+		return "internal-service-token"
+	}
+
+	// Создаем claims
+	claims := jwt.MapClaims{
+		"user_id": userID.String(),
+		"role":    role,
+		"exp":     time.Now().Add(time.Hour).Unix(), // токен на 1 час
+		"iat":     time.Now().Unix(),
+	}
+
+	// Создаем токен
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	// Подписываем токен
+	tokenString, err := token.SignedString([]byte(s.jwtSecret))
+	if err != nil {
+		// В случае ошибки возвращаем fallback
+		s.logger.Error("Failed to generate JWT token", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return "internal-service-token"
+	}
+
+	return tokenString
+}
+
+// buildAppointmentFileResponse создает ответ с информацией о файле записи
+func (s *appointmentService) buildAppointmentFileResponse(appointmentFile *models.AppointmentFile, fileName, originalName, mimeType string, size int64) (*models.AppointmentFileResponse, error) {
+	return &models.AppointmentFileResponse{
+		ID:            appointmentFile.ID,
+		AppointmentID: appointmentFile.AppointmentID,
+		FileID:        appointmentFile.FileID,
+		FileType:      appointmentFile.FileType,
+		UploadedBy:    appointmentFile.UploadedBy,
+		CreatedAt:     appointmentFile.CreatedAt,
+		FileName:      fileName,
+		OriginalName:  originalName,
+		MimeType:      mimeType,
+		Size:          size,
+	}, nil
+}
+
+// getUserData получает данные пользователя из identity_service
+func (s *appointmentService) getUserData(userID uuid.UUID) (*UserData, error) {
+	url := fmt.Sprintf("%s/auth/user/%s", s.identityURL, userID.String())
+
+	resp, err := s.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user data: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("identity service returned status %d", resp.StatusCode)
+	}
+
+	var userData UserData
+	if err := json.NewDecoder(resp.Body).Decode(&userData); err != nil {
+		return nil, fmt.Errorf("failed to decode user data: %w", err)
+	}
+
+	return &userData, nil
+}
+
+// getDoctorData получает данные врача из specialist_service
+func (s *appointmentService) getDoctorData(doctorID uuid.UUID) (*DoctorData, error) {
+	url := fmt.Sprintf("%s/api/doctors/%s", s.specialistURL, doctorID.String())
+
+	resp, err := s.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get doctor data: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("specialist service returned status %d", resp.StatusCode)
+	}
+
+	var doctorData DoctorData
+	if err := json.NewDecoder(resp.Body).Decode(&doctorData); err != nil {
+		return nil, fmt.Errorf("failed to decode doctor data: %w", err)
+	}
+
+	return &doctorData, nil
+}
+
+// UserData - структура для данных пользователя
+type UserData struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Phone string `json:"phone"`
+	Role  string `json:"role"`
+}
+
+// DoctorData - структура для данных врача
+type DoctorData struct {
+	ID         string   `json:"id"`
+	UserID     string   `json:"user_id"`
+	FirstName  string   `json:"first_name"`
+	MiddleName string   `json:"middle_name"`
+	LastName   string   `json:"last_name"`
+	Email      string   `json:"email"`
+	Phone      string   `json:"phone"`
+	Roles      []string `json:"roles"`
+}

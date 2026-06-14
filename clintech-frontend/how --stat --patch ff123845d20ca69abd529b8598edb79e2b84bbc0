@@ -1,0 +1,63 @@
+[33mcommit 7975034d3c1b085382b80a63f49e06559e25c93b[m
+Author: tsukinom1 <alkuat.zh@icloud.com>
+Date:   Thu Aug 21 12:54:40 2025 +0500
+
+    last updates
+---
+ src/app/doctor/my-appointments/[appointmentId]/page.tsx                 | 1 [32m+[m
+ src/app/patient/my-appointments/[appointmentId]/page.tsx                | 2 [32m+[m[31m-[m
+ src/components/doctor/appointments/appointmentsId/AppointmentHeader.tsx | 7 [32m++++[m[31m---[m
+ 3 files changed, 6 insertions(+), 4 deletions(-)
+
+[1mdiff --git a/src/app/doctor/my-appointments/[appointmentId]/page.tsx b/src/app/doctor/my-appointments/[appointmentId]/page.tsx[m
+[1mindex 54efb3f..e81260a 100644[m
+[1m--- a/src/app/doctor/my-appointments/[appointmentId]/page.tsx[m
+[1m+++ b/src/app/doctor/my-appointments/[appointmentId]/page.tsx[m
+[36m@@ -130,6 +130,7 @@[m [mexport default function AppointmentPage() {[m
+                         appointment={appointment as TAppointment}[m
+                         patient={patient as TPatient}[m
+                         actualStatus={actualStatus || ''}[m
+[32m+[m[32m                        isDoctor={true}[m
+                         onAppointmentUpdated={() => {[m
+                             // Обновляем данные приема после переноса[m
+                             window.location.reload();[m
+[1mdiff --git a/src/app/patient/my-appointments/[appointmentId]/page.tsx b/src/app/patient/my-appointments/[appointmentId]/page.tsx[m
+[1mindex ed1a9bc..67be46f 100644[m
+[1m--- a/src/app/patient/my-appointments/[appointmentId]/page.tsx[m
+[1m+++ b/src/app/patient/my-appointments/[appointmentId]/page.tsx[m
+[36m@@ -166,7 +166,7 @@[m [mexport default function PatientAppointmentPage() {[m
+             <PagesLayout title='Информация о приёме' description='Актуальная информация о приёме'>[m
+                 <div className='container mx-auto px-4 space-y-4'>[m
+ [m
+[31m-                    <AppointmentHeader appointment={appointment as TAppointment} patient={patient as TPatient} actualStatus={actualStatus || ''} />[m
+[32m+[m[32m                    <AppointmentHeader appointment={appointment as TAppointment} patient={patient as TPatient} actualStatus={actualStatus || ''} isDoctor={false} />[m
+                     <div className='grid grid-cols-1 lg:grid-cols-3 gap-4'>[m
+ [m
+                         {/* Правая панель */}[m
+[1mdiff --git a/src/components/doctor/appointments/appointmentsId/AppointmentHeader.tsx b/src/components/doctor/appointments/appointmentsId/AppointmentHeader.tsx[m
+[1mindex 2aec34b..32c620d 100644[m
+[1m--- a/src/components/doctor/appointments/appointmentsId/AppointmentHeader.tsx[m
+[1m+++ b/src/components/doctor/appointments/appointmentsId/AppointmentHeader.tsx[m
+[36m@@ -14,9 +14,10 @@[m [minterface IAppointmentHeaderProps {[m
+     patient: TPatient | null[m
+     actualStatus: string[m
+     onAppointmentUpdated?: () => void[m
+[32m+[m[32m    isDoctor?: boolean[m
+ }[m
+ [m
+[31m-export default function AppointmentHeader({ appointment, patient, actualStatus, onAppointmentUpdated }: IAppointmentHeaderProps) {[m
+[32m+[m[32mexport default function AppointmentHeader({ appointment, patient, actualStatus, onAppointmentUpdated, isDoctor = true }: IAppointmentHeaderProps) {[m
+     // Используем универсальный утилит для получения всей информации о статусе[m
+     const statusInfo = getAppointmentStatusInfo(appointment)[m
+     const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false)[m
+[36m@@ -122,8 +123,8 @@[m [mexport default function AppointmentHeader({ appointment, patient, actualStatus,[m
+                         </MyButton>[m
+                     )}[m
+ [m
+[31m-                    {/* Кнопка переноса - показываем только для забронированных записей в будущем */}[m
+[31m-                    {(actualStatus === 'booked' && statusInfo.isUpcoming) && ([m
+[32m+[m[32m                    {/* Кнопка переноса - только для врача и только для забронированных записей в будущем */}[m
+[32m+[m[32m                    {isDoctor && (actualStatus === 'booked' && statusInfo.isUpcoming) && ([m
+                         <MyButton[m
+                             onClick={() => setIsRescheduleModalOpen(true)}[m
+                             className="bg-orange-600 hover:bg-orange-700 text-white text-sm flex items-center gap-2"[m

@@ -1,0 +1,1 @@
+export { useLatestAnalysis } from './useLatestAnalysis';

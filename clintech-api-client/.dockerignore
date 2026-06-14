@@ -1,0 +1,23 @@
+# Ignore everything first
+*
+
+# But include necessary files
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!docs/
+!scripts/
+!uploads/
+!*.go
+!logo-word.jpeg
+
+# Exclude specific files we don't need in container
+.git/
+.env
+*.log
+*.tmp
+.DS_Store
+node_modules/
+test_*.go
+*_test.go 

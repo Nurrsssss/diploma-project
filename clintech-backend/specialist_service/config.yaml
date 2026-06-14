@@ -1,0 +1,34 @@
+server:
+  host: 0.0.0.0
+  port: 8803 # Port for the specialist_service
+  read_timeout: 10s
+  write_timeout: 10s
+  shutdown_timeout: 5s
+
+database:
+  host: postgres
+  port: 5432
+  user: postgres
+  password: 61324
+  db_name: clintech_db
+  ssl_mode: disable
+  schema: public
+
+rabbitmq:
+  host: rabbitmq
+  port: 5672
+  user: guest
+  password: guest
+  exchange: clintech
+  doctor_queue: doctor.events
+  user_queue: user.events
+  routing_key: user.created
+
+jwt:
+  secret: 4324pkh23sk4jh342alhdlfl2sdjf
+  expire: 168
+
+logging:
+  console_level: info   # Уровень логов для консоли
+  service_level: info   # Уровень логов для logger_service
+  service_url: http://logger_service:8802 

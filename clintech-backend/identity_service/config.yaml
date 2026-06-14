@@ -1,0 +1,29 @@
+server:
+  host: 0.0.0.0
+  port: 8801 # Port for the identity_service
+
+database:
+  host: postgres
+  port: 5432
+  user: postgres
+  password: 61324
+  db_name: clintech_db
+  ssl_mode: disable
+
+jwt:
+  secret: 4324pkh23sk4jh342alhdlfl2sdjf
+  expire: 168
+
+rabbitmq:
+  host: rabbitmq
+  port: 5672
+  user: guest
+  password: guest
+  exchange: clintech
+  user_queue: user.events
+  routing_key: user.created
+
+logging:
+  console_level: info  # Только ошибки будут выводиться в консоль
+  service_level: info   # Все информационные сообщения будут отправляться в logger_service
+  service_url: http://logger_service:8802

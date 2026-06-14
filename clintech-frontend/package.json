@@ -1,0 +1,48 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@headlessui/react": "^2.2.4",
+    "@radix-ui/react-avatar": "^1.1.10",
+    "@radix-ui/react-select": "^2.2.5",
+    "busboy": "^1.6.0",
+    "class-variance-authority": "^0.7.1",
+    "date-fns": "2.30.0",
+    "formidable": "^3.5.4",
+    "framer-motion": "^12.12.2",
+    "jsonwebtoken": "^9.0.3",
+    "jspdf": "^3.0.1",
+    "jwt-decode": "^4.0.0",
+    "lucide-react": "^0.511.0",
+    "next": "^16.1.1",
+    "next-themes": "^0.4.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-h5-audio-player": "^3.10.0",
+    "react-hook-form": "^7.56.4",
+    "react-icons": "^5.5.0",
+    "react-markdown": "^10.1.0",
+    "react-media-recorder": "^1.7.1",
+    "replicate": "^1.0.1",
+    "swiper": "^11.2.8",
+    "tailwind-merge": "^3.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "20.19.0",
+    "@types/react": "19.2.3",
+    "@types/react-dom": "19.2.3",
+    "autoprefixer": "^10.0.0",
+    "postcss": "^8.0.0",
+    "tailwindcss": "^3.0.0",
+    "typescript": "5.8.3"
+  }
+}

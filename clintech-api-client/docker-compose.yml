@@ -1,0 +1,53 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: clintech-api-client-api
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: clintech_user
+      DB_PASSWORD: clintech_password
+      DB_NAME: clintech_db
+      DB_SSLMODE: disable
+    volumes:
+      - ./uploads:/app/uploads
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "cat </dev/tcp/127.0.0.1/8080 >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    networks:
+      - clintech_app-network
+
+  postgres:
+    image: postgres:16
+    container_name: clintech_api_postgres
+    environment:
+      POSTGRES_DB: clintech_db
+      POSTGRES_USER: clintech_user
+      POSTGRES_PASSWORD: clintech_password
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - clintech_app-network
+
+volumes:
+  postgres_data:
+
+networks:
+  clintech_app-network:
+    external: true
