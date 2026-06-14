@@ -27,7 +27,7 @@ envVarGroups:
 
 services:
   # ---------------- Identity Service ----------------
-  - type: pserv
+  - type: web
     name: identity-service
     runtime: docker
     plan: free
@@ -55,7 +55,7 @@ services:
       - fromGroup: clintech-shared
 
   # ---------------- Patient Service ----------------
-  - type: pserv
+  - type: web
     name: patient-service
     runtime: docker
     plan: free
@@ -81,7 +81,7 @@ services:
       - fromGroup: clintech-shared
 
   # ---------------- Specialist Service ----------------
-  - type: pserv
+  - type: web
     name: specialist-service
     runtime: docker
     plan: free
@@ -107,7 +107,7 @@ services:
       - fromGroup: clintech-shared
 
   # ---------------- Appointment Service ----------------
-  - type: pserv
+  - type: web
     name: appointment-service
     runtime: docker
     plan: free
