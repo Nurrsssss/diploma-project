@@ -1,0 +1,192 @@
+# Render Blueprint для разового деплоя Vitalem (демо на 1 день)
+#
+# Что включено (минимум для демонстрации):
+#   - PostgreSQL (общая БД для всех сервисов)
+#   - identity, patient, specialist, appointment - приватные сервисы
+#   - gateway - публичный API (единая точка входа)
+#   - frontend - публичный Next.js сайт
+#
+# Что ВЫКЛЮЧЕНО (можно добавить отдельно при необходимости):
+#   - RabbitMQ / NotificationService (события и уведомления)
+#   - MinIO / FileServerService (загрузка файлов)
+#   - ELK (logger_service, elasticsearch, kibana, filebeat)
+#
+# Деплой: Render Dashboard -> New -> Blueprint -> выбрать этот репозиторий
+
+databases:
+  - name: clintech-db
+    plan: free
+    databaseName: clintech_db
+    user: clintech
+
+envVarGroups:
+  - name: clintech-shared
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+
+services:
+  # ---------------- Identity Service ----------------
+  - type: pserv
+    name: identity-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./clintech-backend/identity_service/Dockerfile
+    dockerContext: ./clintech-backend
+    healthCheckPath: /health
+    envVars:
+      - key: SERVER_PORT
+        value: 8801
+      - key: DB_HOST
+        fromDatabase: { name: clintech-db, property: host }
+      - key: DB_PORT
+        fromDatabase: { name: clintech-db, property: port }
+      - key: DB_USER
+        fromDatabase: { name: clintech-db, property: user }
+      - key: DB_PASS
+        fromDatabase: { name: clintech-db, property: password }
+      - key: DB_NAME
+        fromDatabase: { name: clintech-db, property: database }
+      - key: DB_SSL_MODE
+        value: require
+      - key: RMQ_HOST
+        value: ""
+      - key: LOGGER_SERVICE_URL
+        value: ""
+      - key: JWT_SECRET
+        fromGroup: clintech-shared
+
+  # ---------------- Patient Service ----------------
+  - type: pserv
+    name: patient-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./clintech-backend/patient_service/Dockerfile
+    dockerContext: ./clintech-backend
+    healthCheckPath: /health
+    envVars:
+      - key: SERVER_PORT
+        value: 8804
+      - key: DB_HOST
+        fromDatabase: { name: clintech-db, property: host }
+      - key: DB_PORT
+        fromDatabase: { name: clintech-db, property: port }
+      - key: DB_USER
+        fromDatabase: { name: clintech-db, property: user }
+      - key: DB_PASS
+        fromDatabase: { name: clintech-db, property: password }
+      - key: DB_NAME
+        fromDatabase: { name: clintech-db, property: database }
+      - key: DB_SSL_MODE
+        value: require
+      - key: LOGGER_SERVICE_URL
+        value: ""
+      - key: JWT_SECRET
+        fromGroup: clintech-shared
+
+  # ---------------- Specialist Service ----------------
+  - type: pserv
+    name: specialist-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./clintech-backend/specialist_service/Dockerfile
+    dockerContext: ./clintech-backend
+    healthCheckPath: /health
+    envVars:
+      - key: SERVER_PORT
+        value: 8803
+      - key: DB_HOST
+        fromDatabase: { name: clintech-db, property: host }
+      - key: DB_PORT
+        fromDatabase: { name: clintech-db, property: port }
+      - key: DB_USER
+        fromDatabase: { name: clintech-db, property: user }
+      - key: DB_PASS
+        fromDatabase: { name: clintech-db, property: password }
+      - key: DB_NAME
+        fromDatabase: { name: clintech-db, property: database }
+      - key: DB_SSL_MODE
+        value: require
+      - key: LOGGER_SERVICE_URL
+        value: ""
+      - key: JWT_SECRET
+        fromGroup: clintech-shared
+
+  # ---------------- Appointment Service ----------------
+  - type: pserv
+    name: appointment-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./clintech-backend/appointment_service/Dockerfile
+    dockerContext: ./clintech-backend
+    healthCheckPath: /health
+    envVars:
+      - key: SERVER_PORT
+        value: 8805
+      - key: DB_HOST
+        fromDatabase: { name: clintech-db, property: host }
+      - key: DB_PORT
+        fromDatabase: { name: clintech-db, property: port }
+      - key: DB_USER
+        fromDatabase: { name: clintech-db, property: user }
+      - key: DB_PASS
+        fromDatabase: { name: clintech-db, property: password }
+      - key: DB_NAME
+        fromDatabase: { name: clintech-db, property: database }
+      - key: DB_SSL_MODE
+        value: require
+      - key: RABBITMQ_URL
+        value: ""
+      - key: LOGGER_SERVICE_URL
+        value: ""
+      - key: JWT_SECRET
+        fromGroup: clintech-shared
+
+  # ---------------- Gateway (публичный вход) ----------------
+  - type: web
+    name: gateway-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./clintech-backend/gateway_service/Dockerfile
+    dockerContext: ./clintech-backend
+    healthCheckPath: /health
+    envVars:
+      - key: GATEWAY_PORT
+        value: 8800
+      - key: IDENTITY_SERVICE_URL
+        value: http://identity-service:8801
+      - key: PATIENT_SERVICE_URL
+        value: http://patient-service:8804
+      - key: SPECIALIST_SERVICE_URL
+        value: http://specialist-service:8803
+      - key: APPOINTMENT_SERVICE_URL
+        value: http://appointment-service:8805
+      - key: JWT_SECRET
+        fromGroup: clintech-shared
+
+  # ---------------- Frontend ----------------
+  - type: web
+    name: clintech-frontend
+    runtime: node
+    plan: free
+    rootDir: clintech-frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      # ВАЖНО: после деплоя gateway-service узнайте его публичный URL
+      # (Render Dashboard -> gateway-service -> вверху страницы) и впишите
+      # его сюда вместо плейсхолдера, например https://gateway-service.onrender.com
+      - key: GATEWAY
+        value: https://gateway-service.onrender.com
+      - key: BACKEND_URL
+        value: https://gateway-service.onrender.com
+      - key: SPECIALIST_SERVICE
+        value: https://gateway-service.onrender.com
+      - key: PATIENT_SERVICE
+        value: https://gateway-service.onrender.com
+      - key: CALENDAR_SERVICE
+        value: https://gateway-service.onrender.com
